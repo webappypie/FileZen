@@ -17,6 +17,9 @@ import '../../../../domain/models/file_operation_models.dart';
 import '../../../../domain/models/file_sort_criteria.dart';
 import '../../../../domain/models/audio_playback_models.dart';
 import '../../../../domain/repositories/i_permission_service.dart';
+import '../../../documents/presentation/screens/document_viewer_screen.dart';
+import '../../../documents/presentation/screens/pdf_studio_screen.dart';
+import '../../../documents/presentation/screens/pdf_viewer_screen.dart';
 import '../../../media/presentation/providers/media_providers.dart';
 import '../../../media/presentation/screens/audio_player_screen.dart';
 import '../../../media/presentation/screens/image_viewer_screen.dart';
@@ -357,6 +360,17 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
             onPressed: () => setState(() => _isGridView = !_isGridView),
           ),
           IconButton(
+            icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
+            tooltip: 'PDF Studio',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => const PdfStudioScreen(),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.create_new_folder_outlined, size: 20),
             tooltip: 'New Folder',
             onPressed: () => _showCreateFolderDialog(context, currentPath),
@@ -467,6 +481,10 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                   const PopupMenuItem(value: 'open_media', child: Text('Play Video')),
                 if (file.category == FileCategory.audio)
                   const PopupMenuItem(value: 'open_media', child: Text('Play Audio')),
+                if (file.extension.toLowerCase() == '.pdf')
+                  const PopupMenuItem(value: 'open_media', child: Text('View PDF')),
+                if (file.category == FileCategory.document && file.extension.toLowerCase() != '.pdf')
+                  const PopupMenuItem(value: 'open_media', child: Text('View Document')),
                 const PopupMenuItem(value: 'details', child: Text('Properties')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
@@ -593,6 +611,18 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (context) => const AudioPlayerScreen(),
+        ),
+      );
+    } else if (file.extension.toLowerCase() == '.pdf') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => PdfViewerScreen(filePath: file.path),
+        ),
+      );
+    } else if (file.category == FileCategory.document) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => DocumentViewerScreen(filePath: file.path),
         ),
       );
     } else {

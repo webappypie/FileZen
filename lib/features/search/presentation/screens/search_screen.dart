@@ -13,6 +13,8 @@ import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/indexing_progress.dart';
 import '../../../../domain/models/search_result_item.dart';
 import 'package:filezen/domain/models/audio_playback_models.dart';
+import 'package:filezen/features/documents/presentation/screens/document_viewer_screen.dart';
+import 'package:filezen/features/documents/presentation/screens/pdf_viewer_screen.dart';
 import 'package:filezen/features/media/presentation/providers/media_providers.dart';
 import 'package:filezen/features/media/presentation/screens/audio_player_screen.dart';
 import 'package:filezen/features/media/presentation/screens/image_viewer_screen.dart';
@@ -517,12 +519,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         actions: [
           if (file.category == FileCategory.image ||
               file.category == FileCategory.video ||
-              file.category == FileCategory.audio)
+              file.category == FileCategory.audio ||
+              file.category == FileCategory.document)
             FilledButton.icon(
               icon: Icon(
                 file.category == FileCategory.image
                     ? Icons.visibility_rounded
-                    : Icons.play_arrow_rounded,
+                    : (file.category == FileCategory.video || file.category == FileCategory.audio)
+                        ? Icons.play_arrow_rounded
+                        : Icons.description_outlined,
                 size: 18,
               ),
               label: Text(
@@ -530,7 +535,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     ? 'View Image'
                     : file.category == FileCategory.video
                         ? 'Play Video'
-                        : 'Play Audio',
+                        : file.category == FileCategory.audio
+                            ? 'Play Audio'
+                            : (file.extension.toLowerCase() == '.pdf' ? 'View PDF' : 'View Document'),
               ),
               onPressed: () {
                 Navigator.of(ctx).pop();
@@ -574,6 +581,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           builder: (context) => const AudioPlayerScreen(),
         ),
       );
+    } else if (file.category == FileCategory.document) {
+      if (file.extension.toLowerCase() == '.pdf') {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (context) => PdfViewerScreen(filePath: file.path as String),
+          ),
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (context) => DocumentViewerScreen(filePath: file.path as String),
+          ),
+        );
+      }
     }
   }
 
