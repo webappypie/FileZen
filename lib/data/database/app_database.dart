@@ -15,19 +15,46 @@ class FileRecords extends Table {
   TextColumn get mimeType => text().nullable()();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
   TextColumn get category => text().nullable()();
+  DateTimeColumn get indexedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [FileRecords])
+@DriftDatabase(
+  tables: [FileRecords],
+  include: {'search_documents.drift'},
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) async {
+          await m.createAll();
+        },
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(fileRecords, fileRecords.indexedAt);
+            await customStatement('''
+              CREATE VIRTUAL TABLE IF NOT EXISTS search_documents USING fts5(
+                file_id UNINDEXED,
+                name,
+                path,
+                content,
+                tags,
+                category,
+                tokenize = 'unicode61'
+              );
+            ''');
+          }
+        },
+      );
 
   static QueryExecutor _openConnection() {
     return driftDatabase(

@@ -1,0 +1,48 @@
+-- Drift FTS5 Virtual Table and Queries for Universal Search
+
+CREATE VIRTUAL TABLE search_documents USING fts5(
+  file_id UNINDEXED,
+  name,
+  path,
+  content,
+  tags,
+  category,
+  tokenize = 'unicode61'
+);
+
+-- Search by text across all indexed fields with bm25 ranking and snippet
+searchFts: SELECT 
+  search_documents.file_id,
+  search_documents.name,
+  search_documents.path,
+  search_documents.category,
+  bm25(search_documents) AS rank,
+  snippet(search_documents, 3, '[match]', '[/match]', '...', 15) AS snippet
+FROM search_documents 
+WHERE search_documents MATCH :query 
+ORDER BY rank;
+
+-- Search filtered by category
+searchFtsWithCategory: SELECT 
+  search_documents.file_id,
+  search_documents.name,
+  search_documents.path,
+  search_documents.category,
+  bm25(search_documents) AS rank,
+  snippet(search_documents, 3, '[match]', '[/match]', '...', 15) AS snippet
+FROM search_documents 
+WHERE search_documents MATCH :query AND search_documents.category = :category 
+ORDER BY rank;
+
+-- Insert into FTS index
+insertSearchDocument: INSERT INTO search_documents(file_id, name, path, content, tags, category)
+VALUES (:fileId, :name, :path, :content, :tags, :category);
+
+-- Delete from FTS index by file_id
+deleteSearchDocumentByFileId: DELETE FROM search_documents WHERE file_id = :fileId;
+
+-- Clear all search documents
+clearSearchDocuments: DELETE FROM search_documents;
+
+-- Count indexed documents
+countSearchDocuments: SELECT count(*) AS count FROM search_documents;

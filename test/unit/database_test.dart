@@ -73,5 +73,46 @@ void main() {
       final updated = await (db.select(db.fileRecords)..where((t) => t.id.equals('file_002'))).getSingle();
       expect(updated.isFavorite, isTrue);
     });
+
+    test('supports FTS5 search across documents with rank and snippet', () async {
+      await db.insertSearchDocument(
+        'file_001',
+        'invoice_march_2026.pdf',
+        '/storage/emulated/0/Download/invoice_march_2026.pdf',
+        'Invoice for consulting services rendered in March 2026 Total amount 1500 USD',
+        'finance,tax,work',
+        'Documents',
+      );
+
+      await db.insertSearchDocument(
+        'file_002',
+        'beach_photo.jpg',
+        '/storage/emulated/0/DCIM/beach_photo.jpg',
+        'exif metadata vacation sunny beach resort',
+        'trip,summer',
+        'Images',
+      );
+
+      // Search matching content
+      final results = await db.searchFts('consulting*').get();
+      expect(results.length, 1);
+      expect(results.first.fileId, 'file_001');
+      expect(results.first.name, 'invoice_march_2026.pdf');
+      expect(results.first.snippet, contains('[match]consulting[/match]'));
+
+      // Search matching category
+      final docResults = await db.searchFtsWithCategory('2026*', 'Documents').get();
+      expect(docResults.length, 1);
+      expect(docResults.first.fileId, 'file_001');
+
+      // Test count
+      final count = await db.countSearchDocuments().getSingle();
+      expect(count, 2);
+
+      // Test delete
+      await db.deleteSearchDocumentByFileId('file_001');
+      final afterDelete = await db.searchFts('consulting*').get();
+      expect(afterDelete.isEmpty, isTrue);
+    });
   });
 }
