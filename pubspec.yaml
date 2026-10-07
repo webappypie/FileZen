@@ -21,6 +21,9 @@ dependencies:
   # WAPCentral Core SDK (Client foundation)
   wap_core_sdk:
     path: ../WAPCentral/sdks/wap_core_sdk
+  permission_handler: ^13.0.2
+  mime: ^2.1.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

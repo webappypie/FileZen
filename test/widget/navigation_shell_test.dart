@@ -1,12 +1,39 @@
 import 'package:filezen/app/bootstrap/app_bootstrap.dart';
+import 'package:filezen/domain/models/storage_location.dart';
+import 'package:filezen/domain/repositories/i_permission_service.dart';
+import 'package:filezen/features/files/presentation/providers/storage_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _FakePermissionNotifier extends StoragePermissionNotifier {
+  final StoragePermissionStatus _status;
+  _FakePermissionNotifier(this._status);
+
+  @override
+  Future<StoragePermissionStatus> build() async => _status;
+}
+
 void main() {
   testWidgets('NavigationShell renders 5 tabs and allows tab navigation', (WidgetTester tester) async {
+    const fakeLocation = StorageLocation(
+      id: 'test_internal',
+      name: 'Internal Storage',
+      path: '/mock/storage/emulated/0',
+      totalBytes: 128 * 1024 * 1024 * 1024,
+      freeBytes: 64 * 1024 * 1024 * 1024,
+    );
+
     await tester.pumpWidget(
-      const ProviderScope(
-        child: FileZenApp(),
+      ProviderScope(
+        overrides: [
+          storagePermissionStateProvider.overrideWith(
+            () => _FakePermissionNotifier(StoragePermissionStatus.granted),
+          ),
+          storageLocationsProvider.overrideWith(
+            (ref) => Future.value([fakeLocation]),
+          ),
+        ],
+        child: const FileZenApp(),
       ),
     );
     await tester.pumpAndSettle();
@@ -29,7 +56,7 @@ void main() {
     // Switch to Files tab
     await tester.tap(find.text('Files'));
     await tester.pumpAndSettle();
-    expect(find.text('Locations'), findsOneWidget);
+    expect(find.text('Select a Storage Location'), findsOneWidget);
 
     // Switch to AI tab
     await tester.tap(find.text('AI'));
