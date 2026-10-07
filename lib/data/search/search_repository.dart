@@ -33,7 +33,7 @@ class SearchRepository implements ISearchRepository {
       final text = query.text.trim();
 
       // Case 1: Text search via FTS5
-      if (text.isNotEmpty) {
+      if (text.isNotEmpty && text != '*') {
         final ftsQuery = _sanitizeFtsQuery(text);
         if (ftsQuery.isEmpty) {
           return Result.success([]);
@@ -110,13 +110,21 @@ class SearchRepository implements ISearchRepository {
         return Result.success(items);
       }
 
-      // Case 2: Category filter with empty text query (browse by category)
-      if (query.category != null) {
-        final categoryName = query.category!.displayName;
-        final records = await (_db.select(_db.fileRecords)
-              ..where((t) => t.category.equals(categoryName))
-              ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)]))
-            .get();
+      // Case 2: Category or filter browse with wildcard / empty text query
+      if (query.category != null || query.minSize != null || query.maxSize != null) {
+        var queryBuilder = _db.select(_db.fileRecords);
+        if (query.category != null) {
+          final categoryName = query.category!.displayName;
+          queryBuilder = queryBuilder..where((t) => t.category.equals(categoryName));
+        }
+        if (query.minSize != null) {
+          queryBuilder = queryBuilder..where((t) => t.size.isBiggerOrEqualValue(BigInt.from(query.minSize!)));
+        }
+        if (query.maxSize != null) {
+          queryBuilder = queryBuilder..where((t) => t.size.isSmallerOrEqualValue(BigInt.from(query.maxSize!)));
+        }
+
+        final records = await (queryBuilder..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)])).get();
 
         final items = records.map((record) {
           final entity = FileEntity(
@@ -184,7 +192,13 @@ class SearchRepository implements ISearchRepository {
     if (clean.isEmpty) return '';
 
     final words = clean.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
-    // Append wildcard * to every term for responsive search-as-you-type prefix matching
-    return words.map((w) => '$w*').join(' ');
+    // Append wildcard * to terms for responsive search prefix matching, preserving operators
+    return words.map((w) {
+      final upper = w.toUpperCase();
+      if (upper == 'OR' || upper == 'AND' || upper == 'NOT') {
+        return upper;
+      }
+      return '$w*';
+    }).join(' ');
   }
 }

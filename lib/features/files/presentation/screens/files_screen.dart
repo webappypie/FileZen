@@ -26,6 +26,8 @@ import '../../../media/presentation/screens/image_viewer_screen.dart';
 import '../../../media/presentation/screens/video_player_screen.dart';
 import '../../../media/presentation/widgets/mini_audio_player_bar.dart';
 import '../../../search/presentation/providers/search_providers.dart';
+import '../../../ai/presentation/providers/ai_providers.dart';
+import '../../../ai/presentation/widgets/related_files_sheet.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
 
@@ -487,6 +489,10 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                   const PopupMenuItem(value: 'open_media', child: Text('View Document')),
                 const PopupMenuItem(value: 'details', child: Text('Properties')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                if (!file.isDirectory)
+                  const PopupMenuItem(value: 'ai_rename', child: Text('AI Auto-Rename')),
+                if (!file.isDirectory)
+                  const PopupMenuItem(value: 'related', child: Text('Related Files')),
                 const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
                 const PopupMenuItem(value: 'copy', child: Text('Copy')),
                 const PopupMenuItem(value: 'cut', child: Text('Move (Cut)')),
@@ -640,6 +646,12 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
         break;
       case 'rename':
         _showRenameDialog(context, file);
+        break;
+      case 'ai_rename':
+        _showAiRenameDialog(context, file);
+        break;
+      case 'related':
+        _showRelatedFiles(context, file);
         break;
       case 'duplicate':
         _executeDuplicate(context, file);
@@ -1154,7 +1166,97 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           ),
         ),
         actions: [
+          if (!file.isDirectory)
+            TextButton.icon(
+              icon: const Icon(Icons.hub_outlined, size: 16),
+              label: const Text('Related Files'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _showRelatedFiles(context, file);
+              },
+            ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  void _showRelatedFiles(BuildContext context, FileEntity file) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surfaceDark,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => RelatedFilesSheet(targetFile: file),
+    );
+  }
+
+  Future<void> _showAiRenameDialog(BuildContext context, FileEntity file) async {
+    final autoRename = ref.read(autoRenameServiceProvider);
+    final suggestion = await autoRename.generateRenameSuggestion(file);
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.auto_fix_high_rounded, color: AppColors.accent),
+            SizedBox(width: 8),
+            Text('AI Auto-Rename', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Original Name:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(suggestion.originalName, style: const TextStyle(fontWeight: FontWeight.w500)),
+            const SizedBox(height: 12),
+            const Text('Suggested Name:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(
+              suggestion.suggestedName,
+              style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'Reason: ${suggestion.reason}',
+                style: const TextStyle(fontSize: 11, color: AppColors.primary),
+              ),
+            ),
+            if (suggestion.hasCollision) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Notice: Filename collision detected. Suffix appended.',
+                style: TextStyle(fontSize: 11, color: AppColors.warning),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final success = await autoRename.applyRename(suggestion);
+              if (!context.mounted) return;
+              if (success) {
+                ref.read(autoRenameHistoryNotifierProvider.notifier).refresh();
+                ref.invalidate(directoryContentsProvider(p.dirname(file.path)));
+                _showSnackBar(context, 'Renamed to ${suggestion.suggestedName}');
+              } else {
+                _showSnackBar(context, 'Failed to rename file');
+              }
+            },
+            child: const Text('Apply Rename'),
+          ),
         ],
       ),
     );

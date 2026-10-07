@@ -1,6 +1,7 @@
 import 'package:filezen/app/bootstrap/app_bootstrap.dart';
 import 'package:filezen/domain/models/storage_location.dart';
 import 'package:filezen/domain/repositories/i_permission_service.dart';
+import 'package:filezen/features/ai/presentation/providers/ai_providers.dart';
 import 'package:filezen/features/files/presentation/providers/storage_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,9 @@ void main() {
           ),
           storageLocationsProvider.overrideWith(
             (ref) => Future.value([fakeLocation]),
+          ),
+          smartCollectionsProvider.overrideWith(
+            (ref) => Future.value([]),
           ),
         ],
         child: const FileZenApp(),
