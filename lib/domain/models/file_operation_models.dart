@@ -9,6 +9,8 @@ enum FileOperationType {
   move,
   delete,
   checksum,
+  compress,
+  extract,
 }
 
 /// Conflict resolution strategy when target file already exists.

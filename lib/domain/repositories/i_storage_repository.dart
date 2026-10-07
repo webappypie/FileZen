@@ -53,4 +53,32 @@ abstract class IStorageRepository {
     CancellationToken? cancellationToken,
     void Function(FileOperationProgress)? onProgress,
   });
+
+  /// Batch copies multiple files/folders to target directory.
+  Future<Result<List<FileEntity>>> batchCopy(
+    List<String> sourcePaths,
+    String targetDirectory, {
+    FileConflictStrategy conflictStrategy = FileConflictStrategy.renameNew,
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  });
+
+  /// Batch moves multiple files/folders to target directory.
+  Future<Result<List<FileEntity>>> batchMove(
+    List<String> sourcePaths,
+    String targetDirectory, {
+    FileConflictStrategy conflictStrategy = FileConflictStrategy.renameNew,
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  });
+
+  /// Batch renames files with progress and cancellation.
+  Future<Result<List<FileEntity>>> batchRename(
+    Map<String, String> pathToNewNames, {
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  });
+
+  /// Duplicates a file in place by appending copy indicator.
+  Future<Result<FileEntity>> duplicate(String path);
 }

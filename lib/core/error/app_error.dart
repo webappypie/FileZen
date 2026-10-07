@@ -40,6 +40,18 @@ class FileNotFoundError extends AppError {
   });
 }
 
+/// Invalid file or folder path.
+class InvalidPathError extends AppError {
+  final String path;
+
+  const InvalidPathError({
+    this.path = '',
+    super.message = 'The specified path is invalid.',
+    super.technicalDetails,
+    super.recoverySuggestion,
+  });
+}
+
 /// Access denied / permission restriction.
 class AccessDeniedError extends AppError {
   final String path;

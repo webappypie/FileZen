@@ -485,4 +485,176 @@ class FilesystemStorageRepository implements IStorageRepository {
       counter++;
     }
   }
+
+  @override
+  Future<Result<List<FileEntity>>> batchCopy(
+    List<String> sourcePaths,
+    String targetDirectory, {
+    FileConflictStrategy conflictStrategy = FileConflictStrategy.renameNew,
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  }) async {
+    final results = <FileEntity>[];
+    final total = sourcePaths.length;
+    int processed = 0;
+
+    for (final src in sourcePaths) {
+      if (cancellationToken?.isCancelled == true) {
+        onProgress?.call(FileOperationProgress(
+          operationId: 'batch_copy',
+          type: FileOperationType.copy,
+          totalItems: total,
+          processedItems: processed,
+          isCancelled: true,
+        ));
+        return Result.failure(const OperationCancelledError());
+      }
+
+      final copyRes = await copyFile(
+        src,
+        targetDirectory,
+        conflictStrategy: conflictStrategy,
+        cancellationToken: cancellationToken,
+      );
+
+      copyRes.when(
+        success: (entity) => results.add(entity),
+        failure: (e) => AppLogger.warning('Partial failure copying $src: ${e.message}', 'StorageRepo'),
+      );
+
+      processed++;
+      onProgress?.call(FileOperationProgress(
+        operationId: 'batch_copy',
+        type: FileOperationType.copy,
+        totalItems: total,
+        processedItems: processed,
+        currentItemName: p.basename(src),
+      ));
+    }
+
+    onProgress?.call(FileOperationProgress(
+      operationId: 'batch_copy',
+      type: FileOperationType.copy,
+      totalItems: total,
+      processedItems: total,
+      isCompleted: true,
+    ));
+
+    return Result.success(results);
+  }
+
+  @override
+  Future<Result<List<FileEntity>>> batchMove(
+    List<String> sourcePaths,
+    String targetDirectory, {
+    FileConflictStrategy conflictStrategy = FileConflictStrategy.renameNew,
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  }) async {
+    final results = <FileEntity>[];
+    final total = sourcePaths.length;
+    int processed = 0;
+
+    for (final src in sourcePaths) {
+      if (cancellationToken?.isCancelled == true) {
+        onProgress?.call(FileOperationProgress(
+          operationId: 'batch_move',
+          type: FileOperationType.move,
+          totalItems: total,
+          processedItems: processed,
+          isCancelled: true,
+        ));
+        return Result.failure(const OperationCancelledError());
+      }
+
+      final moveRes = await moveFile(
+        src,
+        targetDirectory,
+        conflictStrategy: conflictStrategy,
+        cancellationToken: cancellationToken,
+      );
+
+      moveRes.when(
+        success: (entity) => results.add(entity),
+        failure: (e) => AppLogger.warning('Partial failure moving $src: ${e.message}', 'StorageRepo'),
+      );
+
+      processed++;
+      onProgress?.call(FileOperationProgress(
+        operationId: 'batch_move',
+        type: FileOperationType.move,
+        totalItems: total,
+        processedItems: processed,
+        currentItemName: p.basename(src),
+      ));
+    }
+
+    onProgress?.call(FileOperationProgress(
+      operationId: 'batch_move',
+      type: FileOperationType.move,
+      totalItems: total,
+      processedItems: total,
+      isCompleted: true,
+    ));
+
+    return Result.success(results);
+  }
+
+  @override
+  Future<Result<List<FileEntity>>> batchRename(
+    Map<String, String> pathToNewNames, {
+    CancellationToken? cancellationToken,
+    void Function(FileOperationProgress)? onProgress,
+  }) async {
+    final results = <FileEntity>[];
+    final total = pathToNewNames.length;
+    int processed = 0;
+
+    for (final entry in pathToNewNames.entries) {
+      if (cancellationToken?.isCancelled == true) {
+        onProgress?.call(FileOperationProgress(
+          operationId: 'batch_rename',
+          type: FileOperationType.rename,
+          totalItems: total,
+          processedItems: processed,
+          isCancelled: true,
+        ));
+        return Result.failure(const OperationCancelledError());
+      }
+
+      final renameRes = await rename(entry.key, entry.value);
+      renameRes.when(
+        success: (entity) => results.add(entity),
+        failure: (e) => AppLogger.warning('Partial failure renaming ${entry.key}: ${e.message}', 'StorageRepo'),
+      );
+
+      processed++;
+      onProgress?.call(FileOperationProgress(
+        operationId: 'batch_rename',
+        type: FileOperationType.rename,
+        totalItems: total,
+        processedItems: processed,
+        currentItemName: entry.value,
+      ));
+    }
+
+    onProgress?.call(FileOperationProgress(
+      operationId: 'batch_rename',
+      type: FileOperationType.rename,
+      totalItems: total,
+      processedItems: total,
+      isCompleted: true,
+    ));
+
+    return Result.success(results);
+  }
+
+  @override
+  Future<Result<FileEntity>> duplicate(String path) async {
+    return copyFile(
+      path,
+      p.dirname(path),
+      conflictStrategy: FileConflictStrategy.renameNew,
+    );
+  }
 }
