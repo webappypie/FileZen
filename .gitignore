@@ -37,7 +37,6 @@ migrate_working_dir/
 **/android/**/captures/
 **/android/**/gradlew
 **/android/**/gradlew.bat
-**/android/**/wrapper/
 
 # iOS/macOS specific
 **/ios/**/GeneratedPluginRegistrant.h

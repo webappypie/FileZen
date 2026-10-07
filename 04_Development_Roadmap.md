@@ -4,10 +4,10 @@ The roadmap is intentionally gated. Each phase is independently implemented, tes
 
 ## Phase sequence
 
-| Phase | Focus | Gate |
-|---|---|---|
-| 00 | Foundation and architecture freeze | Approval of project documentation |
-| 01 | Flutter project bootstrap | Build + baseline tests |
+| Phase | Focus | Gate | Status |
+|---|---|---|---|
+| 00 | Foundation and architecture freeze | Approval of project documentation | Completed & Approved |
+| 01 | Flutter project bootstrap | Build + baseline tests | Completed (Pending Approval) |
 | 02 | Storage access and file abstraction | Real-device storage tests |
 | 03 | Database, indexing and universal search | Large-library benchmarks |
 | 04 | File manager operations and navigation | File-operation test suite |
