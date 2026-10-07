@@ -38,6 +38,25 @@ class Formatters {
     }
   }
 
+  /// Formats a DateTime into a friendly date and time string.
+  static String formatDateTime(DateTime dateTime) {
+    final date = formatDate(dateTime);
+    final hours = dateTime.hour.toString().padLeft(2, '0');
+    final minutes = dateTime.minute.toString().padLeft(2, '0');
+    return '$date, $hours:$minutes';
+  }
+
+  /// Formats a Duration into mm:ss or hh:mm:ss string.
+  static String formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
   /// Truncates string with ellipsis if exceeding max length.
   static String truncate(String text, int maxLength) {
     if (text.length <= maxLength) return text;

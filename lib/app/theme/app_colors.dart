@@ -43,4 +43,7 @@ class AppColors {
   static const Color typeApk = Color(0xFF10B981);
   static const Color typeVault = Color(0xFFEF4444);
   static const Color folderYellow = Color(0xFFF59E0B);
+  static const Color audioOrange = typeAudio;
+  static const Color surfaceDark = darkSurface;
+  static const Color surfaceContainerDark = darkSurfaceVariant;
 }

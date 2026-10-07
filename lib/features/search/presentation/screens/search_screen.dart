@@ -12,6 +12,11 @@ import '../../../../core/widgets/loading_view.dart';
 import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/indexing_progress.dart';
 import '../../../../domain/models/search_result_item.dart';
+import 'package:filezen/domain/models/audio_playback_models.dart';
+import 'package:filezen/features/media/presentation/providers/media_providers.dart';
+import 'package:filezen/features/media/presentation/screens/audio_player_screen.dart';
+import 'package:filezen/features/media/presentation/screens/image_viewer_screen.dart';
+import 'package:filezen/features/media/presentation/screens/video_player_screen.dart';
 import '../providers/search_providers.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -510,6 +515,28 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ],
         ),
         actions: [
+          if (file.category == FileCategory.image ||
+              file.category == FileCategory.video ||
+              file.category == FileCategory.audio)
+            FilledButton.icon(
+              icon: Icon(
+                file.category == FileCategory.image
+                    ? Icons.visibility_rounded
+                    : Icons.play_arrow_rounded,
+                size: 18,
+              ),
+              label: Text(
+                file.category == FileCategory.image
+                    ? 'View Image'
+                    : file.category == FileCategory.video
+                        ? 'Play Video'
+                        : 'Play Audio',
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _openMedia(context, file);
+              },
+            ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Close'),
@@ -517,6 +544,37 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ],
       ),
     );
+  }
+
+  void _openMedia(BuildContext context, dynamic file) {
+    if (file.category == FileCategory.image) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => ImageViewerScreen(
+            imagePaths: [file.path as String],
+            initialIndex: 0,
+          ),
+        ),
+      );
+    } else if (file.category == FileCategory.video) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => VideoPlayerScreen(
+            videoPaths: [file.path as String],
+            initialIndex: 0,
+          ),
+        ),
+      );
+    } else if (file.category == FileCategory.audio) {
+      final player = ref.read(audioPlayerServiceProvider);
+      final track = AudioTrack(id: file.path as String, path: file.path as String, title: file.name as String);
+      player.setQueue([track], initialIndex: 0, autoPlay: true);
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => const AudioPlayerScreen(),
+        ),
+      );
+    }
   }
 
   Widget _buildDetailRow(String label, String value) {

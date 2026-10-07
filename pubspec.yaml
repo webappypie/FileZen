@@ -25,6 +25,9 @@ dependencies:
   mime: ^2.1.0
   crypto: ^3.0.7
   archive: ^3.6.1
+  video_player: ^2.14.1
+  audioplayers: ^6.8.1
+  exif: ^3.3.0
 
 dev_dependencies:
   flutter_test:

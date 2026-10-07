@@ -11,10 +11,17 @@ import '../../../../core/widgets/error_view.dart';
 import '../../../../core/widgets/loading_view.dart';
 import '../../../../core/widgets/permission_view.dart';
 import '../../../../domain/models/file_clipboard.dart';
+import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/file_entity.dart';
 import '../../../../domain/models/file_operation_models.dart';
 import '../../../../domain/models/file_sort_criteria.dart';
+import '../../../../domain/models/audio_playback_models.dart';
 import '../../../../domain/repositories/i_permission_service.dart';
+import '../../../media/presentation/providers/media_providers.dart';
+import '../../../media/presentation/screens/audio_player_screen.dart';
+import '../../../media/presentation/screens/image_viewer_screen.dart';
+import '../../../media/presentation/screens/video_player_screen.dart';
+import '../../../media/presentation/widgets/mini_audio_player_bar.dart';
 import '../../../search/presentation/providers/search_providers.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
@@ -65,7 +72,13 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           return _buildStorageBrowser(context);
         },
       ),
-      bottomNavigationBar: _buildClipboardBar(context),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const MiniAudioPlayerBar(),
+          if (_buildClipboardBar(context) != null) _buildClipboardBar(context)!,
+        ],
+      ),
     );
   }
 
@@ -388,7 +401,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
             itemBuilder: (context, index) {
               final item = items[index];
               final isSelected = selectedPaths.contains(item.path);
-              return _buildGridItem(context, item, isSelected);
+              return _buildGridItem(context, item, isSelected, items);
             },
           );
         }
@@ -400,14 +413,14 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           itemBuilder: (context, index) {
             final item = items[index];
             final isSelected = selectedPaths.contains(item.path);
-            return _buildListItem(context, item, isSelected);
+            return _buildListItem(context, item, isSelected, items);
           },
         );
       },
     );
   }
 
-  Widget _buildListItem(BuildContext context, FileEntity file, bool isSelected) {
+  Widget _buildListItem(BuildContext context, FileEntity file, bool isSelected, List<FileEntity> allItems) {
     final isSelectionMode = ref.watch(selectedFilePathsProvider).isNotEmpty;
 
     return ListTile(
@@ -446,8 +459,14 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           ? null
           : PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert_rounded, size: 20),
-              onSelected: (action) => _handleFileAction(context, file, action),
+              onSelected: (action) => _handleFileAction(context, file, action, allItems),
               itemBuilder: (ctx) => [
+                if (file.category == FileCategory.image)
+                  const PopupMenuItem(value: 'open_media', child: Text('View Image')),
+                if (file.category == FileCategory.video)
+                  const PopupMenuItem(value: 'open_media', child: Text('Play Video')),
+                if (file.category == FileCategory.audio)
+                  const PopupMenuItem(value: 'open_media', child: Text('Play Audio')),
                 const PopupMenuItem(value: 'details', child: Text('Properties')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
@@ -468,7 +487,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
         } else if (file.isDirectory) {
           ref.read(currentDirectoryPathProvider.notifier).state = file.path;
         } else {
-          _showPropertiesDialog(context, file);
+          _handleFileTap(context, file, allItems);
         }
       },
       onLongPress: () {
@@ -477,7 +496,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
     );
   }
 
-  Widget _buildGridItem(BuildContext context, FileEntity file, bool isSelected) {
+  Widget _buildGridItem(BuildContext context, FileEntity file, bool isSelected, List<FileEntity> allItems) {
     final isSelectionMode = ref.watch(selectedFilePathsProvider).isNotEmpty;
 
     return Card(
@@ -500,7 +519,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           } else if (file.isDirectory) {
             ref.read(currentDirectoryPathProvider.notifier).state = file.path;
           } else {
-            _showPropertiesDialog(context, file);
+            _handleFileTap(context, file, allItems);
           }
         },
         onLongPress: () {
@@ -536,8 +555,56 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
     );
   }
 
-  void _handleFileAction(BuildContext context, FileEntity file, String action) {
+  void _handleFileTap(BuildContext context, FileEntity file, List<FileEntity> allFiles) {
+    if (file.category == FileCategory.image) {
+      final images = allFiles.where((f) => f.category == FileCategory.image).map((f) => f.path).toList();
+      final index = images.indexOf(file.path);
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => ImageViewerScreen(
+            imagePaths: images.isNotEmpty ? images : [file.path],
+            initialIndex: index >= 0 ? index : 0,
+          ),
+        ),
+      );
+    } else if (file.category == FileCategory.video) {
+      final videos = allFiles.where((f) => f.category == FileCategory.video).map((f) => f.path).toList();
+      final index = videos.indexOf(file.path);
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => VideoPlayerScreen(
+            videoPaths: videos.isNotEmpty ? videos : [file.path],
+            initialIndex: index >= 0 ? index : 0,
+          ),
+        ),
+      );
+    } else if (file.category == FileCategory.audio) {
+      final audioFiles = allFiles.where((f) => f.category == FileCategory.audio).toList();
+      final tracks = (audioFiles.isNotEmpty ? audioFiles : [file]).map((f) {
+        return AudioTrack(
+          id: f.path,
+          path: f.path,
+          title: f.name,
+        );
+      }).toList();
+      final index = tracks.indexWhere((t) => t.path == file.path);
+      final player = ref.read(audioPlayerServiceProvider);
+      player.setQueue(tracks, initialIndex: index >= 0 ? index : 0, autoPlay: true);
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => const AudioPlayerScreen(),
+        ),
+      );
+    } else {
+      _showPropertiesDialog(context, file);
+    }
+  }
+
+  void _handleFileAction(BuildContext context, FileEntity file, String action, [List<FileEntity>? allItems]) {
     switch (action) {
+      case 'open_media':
+        _handleFileTap(context, file, allItems ?? [file]);
+        break;
       case 'details':
         _showPropertiesDialog(context, file);
         break;
