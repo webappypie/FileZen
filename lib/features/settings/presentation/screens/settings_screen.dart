@@ -7,6 +7,8 @@ import '../../../../app/theme/app_typography.dart';
 import '../../../../app/theme/theme_provider.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
 import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
+import '../../../monitoring/presentation/providers/monitoring_providers.dart';
+import '../../../monitoring/presentation/screens/diagnostics_screen.dart';
 import '../../../transfer/presentation/screens/network_hub_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -16,6 +18,8 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final wapService = ref.watch(wapServiceProvider);
+    final monetization = ref.watch(monetizationStateProvider);
+    final telemetryOptIn = ref.watch(telemetryOptInProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -71,30 +75,60 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           Card(
-            child: Padding(
-              padding: AppSpacing.cardPadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            child: Column(
+              children: [
+                Padding(
+                  padding: AppSpacing.cardPadding,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.shield_outlined, color: AppColors.secondary),
-                      const SizedBox(width: AppSpacing.sm),
+                      Row(
+                        children: [
+                          const Icon(Icons.shield_outlined, color: AppColors.secondary),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(
+                            'Local-First Guarantee',
+                            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
-                        'Local-First Guarantee',
-                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w600),
+                        'All indexing, OCR, file operations, and vault encryption run strictly on your device. FileZen does not silently upload or sync your files.',
+                        style: AppTypography.bodySmall.copyWith(
+                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'All indexing, OCR, file operations, and vault encryption run strictly on your device. FileZen does not silently upload or sync your files.',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  secondary: const Icon(Icons.analytics_outlined, color: AppColors.primary),
+                  title: const Text('Anonymous Diagnostics & Crash Monitoring'),
+                  subtitle: const Text('Strictly zero file names, contents, or personal information.'),
+                  value: telemetryOptIn,
+                  onChanged: (val) async {
+                    ref.read(telemetryOptInProvider.notifier).state = val;
+                    await ref.read(analyticsServiceProvider).setEnabled(val);
+                    await ref.read(crashReporterProvider).setEnabled(val);
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.insights_rounded, color: AppColors.secondary),
+                  title: const Text('Diagnostics & Observability Dashboard'),
+                  subtitle: const Text('Inspect local performance traces, crash logs, and WAPCentral SDK status.'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const DiagnosticsScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -148,14 +182,49 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.sm),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.star_outline_rounded, color: AppColors.primary),
-              title: const Text('Remove Ads (One-Time Purchase)'),
-              subtitle: const Text('Non-intrusive ads; never requires recurring subscriptions.'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('In-app purchase flow integrates in Phase 12')),
-                );
+              leading: Icon(
+                Icons.star_rounded,
+                color: monetization.isAdFreePurchased ? AppColors.success : AppColors.primary,
+              ),
+              title: const Text('Ad-Free Pro (One-Time Purchase)'),
+              subtitle: Text(
+                monetization.isAdFreePurchased
+                    ? 'Active — All advertising is completely disabled.'
+                    : 'Non-intrusive ads active. Tap to remove ads permanently.',
+              ),
+              trailing: monetization.isAdFreePurchased
+                  ? const Chip(
+                      label: Text('ACTIVE'),
+                      backgroundColor: Color(0x2210B981),
+                      side: BorderSide.none,
+                    )
+                  : FilledButton.tonal(
+                      onPressed: () async {
+                        await ref.read(monetizationStateProvider.notifier).setAdFreePurchased(true);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Ad-Free Pro activated! Ads are now suppressed.'),
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Remove'),
+                    ),
+              onTap: () async {
+                final newState = !monetization.isAdFreePurchased;
+                await ref.read(monetizationStateProvider.notifier).setAdFreePurchased(newState);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        newState
+                            ? 'Ad-Free Pro activated! Ads are suppressed.'
+                            : 'Ad-Free revoked. Ad-supported mode active.',
+                      ),
+                    ),
+                  );
+                }
               },
             ),
           ),

@@ -8,6 +8,7 @@ import '../../../../data/wapcentral/wap_client_provider.dart';
 import '../../../../domain/repositories/i_wap_service.dart';
 import '../../../clean/presentation/screens/storage_analysis_screen.dart';
 import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
+import '../../../monitoring/presentation/widgets/filezen_ad_banner.dart';
 import '../../../transfer/presentation/screens/network_hub_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -76,6 +77,10 @@ class HomeScreen extends ConsumerWidget {
 
                   // Network Transfer & Cloud Sources Section
                   _buildNetworkCloudSection(context, isDark),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Non-intrusive Ad/Promo banner (collapses if ad-free or offline)
+                  const FileZenAdBanner(),
                   const SizedBox(height: AppSpacing.xl),
                 ],
               ),

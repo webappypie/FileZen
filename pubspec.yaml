@@ -21,6 +21,12 @@ dependencies:
   # WAPCentral Core SDK (Client foundation)
   wap_core_sdk:
     path: ../WAPCentral/sdks/wap_core_sdk
+  wap_ads_sdk:
+    path: ../WAPCentral/sdks/wap_ads_sdk
+  wap_notifications_sdk:
+    path: ../WAPCentral/sdks/wap_notifications_sdk
+  wap_promo_sdk:
+    path: ../WAPCentral/sdks/wap_promo_sdk
   permission_handler: ^13.0.2
   mime: ^2.1.0
   crypto: ^3.0.7
