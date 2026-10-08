@@ -1,130 +1,185 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
-import '../../../../app/theme/app_typography.dart';
 import '../../../../core/widgets/empty_view.dart';
+import '../../../../domain/models/notification_models.dart';
+import '../../../ai/presentation/screens/ai_screen.dart';
+import '../../../clean/presentation/screens/clean_screen.dart';
+import '../../../clean/presentation/screens/duplicate_review_screen.dart';
+import '../../../settings/presentation/screens/settings_screen.dart';
+import '../../../vault/presentation/screens/vault_screen.dart';
+import '../providers/notification_providers.dart';
+import '../widgets/notification_card.dart';
+import '../widgets/notification_filter_chips.dart';
 
-class NotificationItem {
-  final String id;
-  final String title;
-  final String body;
-  final DateTime timestamp;
-  bool isRead;
-
-  NotificationItem({
-    required this.id,
-    required this.title,
-    required this.body,
-    required this.timestamp,
-    this.isRead = false,
-  });
-}
-
-class NotificationsScreen extends StatefulWidget {
+/// Notifications Center screen allowing users to inspect, filter, dismiss,
+/// and take action on meaningful application events and system notices.
+class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
-  @override
-  State<NotificationsScreen> createState() => _NotificationsScreenState();
-}
+  void _handleDeepLink(BuildContext context, WidgetRef ref, AppNotification item) {
+    ref.read(notificationControllerProvider).markAsRead(item.id);
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
-  final List<NotificationItem> _notifications = [
-    NotificationItem(
-      id: '1',
-      title: 'Welcome to FileZen',
-      body: 'Your files, understood by AI. All local operations work 100% offline.',
-      timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
-      isRead: false,
-    ),
-    NotificationItem(
-      id: '2',
-      title: 'Storage Optimization Ready',
-      body: 'Check the Clean tab to review potential space-saving opportunities safely.',
-      timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      isRead: true,
-    ),
-  ];
+    final route = item.actionRoute;
+    if (route == null) return;
+
+    Widget? targetScreen;
+    if (route == '/clean') {
+      targetScreen = const CleanScreen();
+    } else if (route == '/clean/duplicates') {
+      targetScreen = const DuplicateReviewScreen();
+    } else if (route == '/vault') {
+      targetScreen = const VaultScreen();
+    } else if (route == '/ai') {
+      targetScreen = const AiScreen();
+    } else if (route == '/settings') {
+      targetScreen = const SettingsScreen();
+    }
+
+    if (targetScreen != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => targetScreen!),
+      );
+    }
+  }
+
+  Future<void> _confirmClearAll(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Notifications?'),
+        content: const Text('This will delete all notification cards from your history.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await ref.read(notificationControllerProvider).clearAll();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All notifications cleared')),
+        );
+      }
+    }
+  }
 
   @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final filteredAsync = ref.watch(filteredNotificationsProvider);
+    final unreadCountAsync = ref.watch(unreadNotificationCountProvider);
+    final unreadCount = unreadCountAsync.valueOrNull ?? 0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
         actions: [
-          if (_notifications.isNotEmpty)
-            TextButton(
+          if (unreadCount > 0)
+            IconButton(
+              icon: const Icon(Icons.done_all_rounded),
+              tooltip: 'Mark All as Read',
               onPressed: () {
-                setState(() => _notifications.clear());
+                ref.read(notificationControllerProvider).markAllAsRead();
               },
-              child: const Text('Clear All'),
             ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            tooltip: 'More Options',
+            onSelected: (val) {
+              if (val == 'clear') {
+                _confirmClearAll(context, ref);
+              } else if (val == 'sync') {
+                ref.read(notificationControllerProvider).syncRemoteNotifications(isOnline: true);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'clear',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.delete_sweep_outlined, size: 20),
+                    SizedBox(width: AppSpacing.sm),
+                    Text('Clear All'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'sync',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.sync_rounded, size: 20),
+                    SizedBox(width: AppSpacing.sm),
+                    Text('Check Updates'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
-      body: _notifications.isEmpty
-          ? const EmptyView(
-              icon: Icons.notifications_none_rounded,
-              title: 'No Notifications',
-              subtitle: 'You are all caught up. Meaningful notifications will appear here.',
-            )
-          : ListView.separated(
-              padding: AppSpacing.screenPadding,
-              itemCount: _notifications.length,
-              separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final item = _notifications[index];
-                return Dismissible(
-                  key: Key(item.id),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppColors.error,
-                      borderRadius: AppSpacing.roundedMd,
-                    ),
-                    child: const Icon(Icons.delete_outline, color: Colors.white),
-                  ),
-                  onDismissed: (_) {
-                    setState(() => _notifications.removeAt(index));
-                  },
-                  child: Card(
-                    color: item.isRead
-                        ? null
-                        : (isDark
-                            ? AppColors.primaryDark.withValues(alpha: 0.1)
-                            : AppColors.primary.withValues(alpha: 0.05)),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.xs,
-                      ),
-                      leading: Icon(
-                        item.isRead ? Icons.mark_email_read_outlined : Icons.mark_email_unread_rounded,
-                        color: item.isRead ? AppColors.lightTextSecondary : AppColors.primary,
-                      ),
-                      title: Text(
-                        item.title,
-                        style: AppTypography.titleMedium.copyWith(
-                          fontSize: 15,
-                          fontWeight: item.isRead ? FontWeight.w500 : FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: Text(
-                        item.body,
-                        style: AppTypography.bodySmall.copyWith(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                        ),
-                      ),
+      body: Column(
+        children: [
+          const NotificationFilterChips(),
+          const Divider(height: 1),
+          Expanded(
+            child: filteredAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(child: Text('Error loading notifications: $err')),
+              data: (items) {
+                if (items.isEmpty) {
+                  return const EmptyView(
+                    icon: Icons.notifications_none_rounded,
+                    title: 'No Notifications',
+                    subtitle: 'You are all caught up! Meaningful notifications will appear here.',
+                  );
+                }
+
+                return ListView.separated(
+                  padding: AppSpacing.screenPadding,
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    return NotificationCard(
+                      item: item,
                       onTap: () {
-                        setState(() => item.isRead = true);
+                        if (!item.isRead) {
+                          ref.read(notificationControllerProvider).markAsRead(item.id);
+                        }
                       },
-                    ),
-                  ),
+                      onDismissed: () {
+                        ref.read(notificationControllerProvider).deleteNotification(item.id);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Dismissed: ${item.title}'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      onActionPressed: item.actionRoute != null
+                          ? () => _handleDeepLink(context, ref, item)
+                          : null,
+                    );
+                  },
                 );
               },
             ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -6,6 +6,7 @@ import '../../features/files/presentation/screens/files_screen.dart';
 import '../../features/ai/presentation/screens/ai_screen.dart';
 import '../../features/clean/presentation/screens/clean_screen.dart';
 import '../../features/vault/presentation/screens/vault_screen.dart';
+import '../../features/notifications/presentation/providers/notification_providers.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/search/presentation/screens/search_screen.dart';
@@ -39,31 +40,39 @@ class NavigationShell extends ConsumerWidget {
               );
             },
           ),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                tooltip: 'Notifications Center',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-                  );
-                },
-              ),
-              Positioned(
-                top: 10,
-                right: 10,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.redAccent,
-                    shape: BoxShape.circle,
+          Builder(
+            builder: (context) {
+              final unreadCountAsync = ref.watch(unreadNotificationCountProvider);
+              final hasUnread = (unreadCountAsync.valueOrNull ?? 0) > 0;
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    tooltip: 'Notifications Center',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                      );
+                    },
                   ),
-                ),
-              ),
-            ],
+                  if (hasUnread)
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.redAccent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
