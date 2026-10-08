@@ -11,7 +11,6 @@ import 'package:filezen/data/database/app_database.dart';
 import 'package:filezen/data/storage/filesystem_storage_repository.dart';
 import 'package:filezen/domain/models/cleanup_models.dart';
 import 'package:filezen/domain/models/file_category.dart';
-import 'package:filezen/domain/models/file_entity.dart';
 import 'package:filezen/domain/models/timeline_models.dart';
 
 void main() {
@@ -174,8 +173,8 @@ void main() {
     });
 
     test('scans similar photos based on burst naming and timestamp proximity', () async {
-      final img1 = File(p.join(tempDir.path, 'IMG_20261008_120000_1.jpg'))..writeAsStringSync('photobytes12345');
-      final img2 = File(p.join(tempDir.path, 'IMG_20261008_120000_2.jpg'))..writeAsStringSync('photobytes12345');
+      File(p.join(tempDir.path, 'IMG_20261008_120000_1.jpg')).writeAsStringSync('photobytes12345');
+      File(p.join(tempDir.path, 'IMG_20261008_120000_2.jpg')).writeAsStringSync('photobytes12345');
 
       final similar = await dedupService.scanSimilarPhotos(
         scanPaths: [tempDir.path],
@@ -226,8 +225,8 @@ void main() {
     });
 
     test('scans repeated downloads matching copy pattern', () async {
-      final dl1 = File(p.join(tempDir.path, 'manual (1).pdf'))..writeAsStringSync('download');
-      final dl2 = File(p.join(tempDir.path, 'document_copy.pdf'))..writeAsStringSync('download');
+      File(p.join(tempDir.path, 'manual (1).pdf')).writeAsStringSync('download');
+      File(p.join(tempDir.path, 'document_copy.pdf')).writeAsStringSync('download');
 
       final repeated = await dedupService.scanRepeatedDownloads(scanPaths: [tempDir.path]);
       expect(repeated.any((f) => f.name == 'manual (1).pdf'), isTrue);
@@ -271,8 +270,8 @@ void main() {
 
   group('StorageHygieneService (Storage Intelligence & Trends)', () {
     test('computes storage overview across categories', () async {
-      final f1 = File(p.join(tempDir.path, 'photo.jpg'))..writeAsStringSync('image bytes');
-      final f2 = File(p.join(tempDir.path, 'manual.pdf'))..writeAsStringSync('doc bytes');
+      File(p.join(tempDir.path, 'photo.jpg')).writeAsStringSync('image bytes');
+      File(p.join(tempDir.path, 'manual.pdf')).writeAsStringSync('doc bytes');
 
       final overview = await hygieneService.getStorageOverview(targetPaths: [tempDir.path]);
       expect(overview.totalBytes, greaterThan(0));
@@ -306,7 +305,7 @@ void main() {
 
   group('TimelineService (Chronological Timeline Feeds)', () {
     test('groups files into calendar timeline buckets', () async {
-      final todayFile = File(p.join(tempDir.path, 'today.txt'))..writeAsStringSync('today');
+      File(p.join(tempDir.path, 'today.txt')).writeAsStringSync('today');
       final yesterdayFile = File(p.join(tempDir.path, 'yesterday.txt'))..writeAsStringSync('yesterday');
       await yesterdayFile.setLastModified(DateTime.now().subtract(const Duration(days: 1, hours: 2)));
 

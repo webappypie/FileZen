@@ -5,6 +5,8 @@ import 'package:filezen/domain/models/storage_intelligence_models.dart';
 import 'package:filezen/features/ai/presentation/providers/ai_providers.dart';
 import 'package:filezen/features/clean/presentation/providers/clean_providers.dart';
 import 'package:filezen/features/files/presentation/providers/storage_providers.dart';
+import 'package:filezen/domain/models/vault_models.dart';
+import 'package:filezen/features/vault/presentation/providers/vault_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,6 +51,9 @@ void main() {
           ),
           cleanupOpportunitiesProvider.overrideWith(
             (ref) => Future.value([]),
+          ),
+          vaultSecurityConfigProvider.overrideWith(
+            (ref) => Future.value(const VaultSecurityConfig(isPinConfigured: true)),
           ),
         ],
         child: const FileZenApp(),
