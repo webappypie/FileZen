@@ -6,6 +6,7 @@ class AppConfig {
   final String wapAppId;
   final String wapAppKey;
   final String wapBaseUrl;
+  final String wapPromoSecret;
   final bool preferLocal;
   final bool enableDebugLogging;
 
@@ -14,6 +15,7 @@ class AppConfig {
     required this.wapAppId,
     required this.wapAppKey,
     required this.wapBaseUrl,
+    this.wapPromoSecret = '',
     this.preferLocal = true,
     this.enableDebugLogging = false,
   });
@@ -23,8 +25,9 @@ class AppConfig {
   factory AppConfig.fromEnvironment() {
     const env = String.fromEnvironment('APP_ENV', defaultValue: 'production');
     const customBaseUrl = String.fromEnvironment('WAP_BASE_URL', defaultValue: AppConstants.wapBaseUrl);
-    // Secret key injected via build environment / CI / secure config
+    // Secret keys injected via build environment / CI / secure config
     const key = String.fromEnvironment('WAP_APP_KEY', defaultValue: '');
+    const promoSecret = String.fromEnvironment('WAP_PROMO_SECRET', defaultValue: '');
     const isDebug = bool.fromEnvironment('DEBUG_LOGS', defaultValue: false);
 
     return const AppConfig(
@@ -32,6 +35,7 @@ class AppConfig {
       wapAppId: AppConstants.wapAppId,
       wapAppKey: key,
       wapBaseUrl: customBaseUrl,
+      wapPromoSecret: promoSecret,
       preferLocal: true,
       enableDebugLogging: isDebug,
     );

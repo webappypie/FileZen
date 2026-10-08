@@ -31,6 +31,8 @@ migrate_working_dir/
 # Android specific
 **/android/**/gradle-app.setting
 **/android/**/local.properties
+**/android/**/key.properties
+key.properties
 **/android/**/GeneratedPluginRegistrant.java
 **/android/**/.gradle/
 **/android/**/build/
@@ -56,6 +58,8 @@ migrate_working_dir/
 *.p12
 *.pem
 *.key
+**/key.properties
+key.properties
 **/google-services.json
 **/GoogleService-Info.plist
 .env*

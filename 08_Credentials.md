@@ -42,3 +42,10 @@ Each environment must have independent configuration where practical.
 ## Secret handling
 
 Use platform/build-system secret facilities or secure CI/CD secret storage. Never log secrets. Never include secrets in screenshots, test fixtures, crash payloads, or AI prompts.
+
+## Secret Rotation Notice (Remediation Finding 15)
+
+- **Remediation Action Taken:** A hardcoded production WAPCentral App Key pattern previously referenced in `test/unit/core_test.dart` has been expunged and replaced with a non-production synthetic token. The promo signing secret in `WapCentralManager` has been transitioned to environment injection (`WAP_PROMO_SECRET`).
+- **Required Operator Action:** The exposed production WAPCentral X-App-Key (`wap_key_b3314615802b82d33b53540deaf007681d118d27`) must be rotated/regenerated within the WAPCentral administration portal before public Play Store distribution.
+- **Production Build Injection:** Supply secrets strictly at build time via:
+  `--dart-define=WAP_APP_KEY=<ROTATED_KEY>` and `--dart-define=WAP_PROMO_SECRET=<SECURE_PROMO_SECRET>`.

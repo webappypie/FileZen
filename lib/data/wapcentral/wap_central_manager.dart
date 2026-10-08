@@ -141,7 +141,7 @@ class WapCentralManager implements IWapCentralManager {
         appId: _config.wapAppId,
         appKey: _config.wapAppKey,
         baseUrl: _config.wapBaseUrl,
-        signingSecret: 'filezen_hmac_secret',
+        signingSecret: _config.wapPromoSecret,
         appVersion: AppConstants.appVersion,
         enableLogging: _config.enableDebugLogging,
       );

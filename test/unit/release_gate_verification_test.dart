@@ -19,26 +19,37 @@ void main() {
       expect(AppConstants.firebaseProjectNumber, equals('424198485420'));
     });
 
-    test('source code audit: zero hardcoded secrets or production private keys in lib/', () async {
+    test('source code audit: zero hardcoded secrets or production private keys in lib/ and test/', () async {
       final libDir = Directory('lib');
+      final testDir = Directory('test');
       expect(await libDir.exists(), isTrue);
+      expect(await testDir.exists(), isTrue);
 
       final forbiddenPatterns = [
         RegExp(r'AIza[0-9A-Za-z-_]{35}'), // Google API key
         RegExp(r'sk-[a-zA-Z0-9]{20,}'), // OpenAI API key
         RegExp(r'ghp_[a-zA-Z0-9]{20,}'), // GitHub Personal Access Token
         RegExp(r'-----BEGIN PRIVATE KEY-----'), // Private PEM key
+        RegExp(r'b3314615802b82d33b53540deaf007681d118d27'), // Leaked production WAPCentral App Key
+        RegExp(r'filezen_hmac_secret'), // Hardcoded promo HMAC secret
       ];
 
-      final dartFiles = await libDir
-          .list(recursive: true)
-          .where((f) => f is File && f.path.endsWith('.dart'))
-          .cast<File>()
-          .toList();
+      final allFiles = <File>[];
+      for (final dir in [libDir, testDir]) {
+        final dartFiles = await dir
+            .list(recursive: true)
+            .where((f) =>
+                f is File &&
+                f.path.endsWith('.dart') &&
+                !f.path.endsWith('release_gate_verification_test.dart'))
+            .cast<File>()
+            .toList();
+        allFiles.addAll(dartFiles);
+      }
 
-      expect(dartFiles, isNotEmpty);
+      expect(allFiles, isNotEmpty);
 
-      for (final file in dartFiles) {
+      for (final file in allFiles) {
         final content = await file.readAsString();
         for (final pattern in forbiddenPatterns) {
           final match = pattern.hasMatch(content);

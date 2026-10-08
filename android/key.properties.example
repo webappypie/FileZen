@@ -1,0 +1,14 @@
+# FileZen Release Keystore Configuration Template
+# Copy this file to `android/key.properties` for local release builds or configure CI environment variables.
+# NEVER commit the real `key.properties` or keystore binaries (*.keystore, *.jks) to version control.
+#
+# Supported environment variable fallbacks:
+# FILEZEN_KEYSTORE_PATH
+# FILEZEN_KEYSTORE_PASSWORD
+# FILEZEN_KEY_ALIAS
+# FILEZEN_KEY_PASSWORD
+
+storePassword=your_keystore_password
+keyPassword=your_key_password
+keyAlias=filezen_release
+storeFile=../app/release.keystore

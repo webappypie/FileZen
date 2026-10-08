@@ -135,3 +135,12 @@ class UnknownError extends AppError {
     super.recoverySuggestion = 'Please try again.',
   });
 }
+
+/// Security constraint violation (e.g. archive traversal, signature mismatch).
+class SecurityError extends AppError {
+  const SecurityError({
+    super.message = 'A security constraint was violated.',
+    super.technicalDetails,
+    super.recoverySuggestion = 'The suspicious operation was blocked for your protection.',
+  });
+}

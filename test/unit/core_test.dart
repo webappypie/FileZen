@@ -68,9 +68,9 @@ void main() {
 
   group('AppLogger Redaction', () {
     test('redact strips wap_key secrets and authorization tokens', () {
-      const secret = 'Connecting with wap_key_b3314615802b82d33b53540deaf007681d118d27 to gateway';
+      const secret = 'Connecting with wap_key_mocktestredactiontoken9876543210 to gateway';
       final redacted = AppLogger.redact(secret);
-      expect(redacted.contains('b3314615802b82d33b53540deaf007681d118d27'), isFalse);
+      expect(redacted.contains('mocktestredactiontoken9876543210'), isFalse);
       expect(redacted, contains('[REDACTED_APP_KEY]'));
     });
   });

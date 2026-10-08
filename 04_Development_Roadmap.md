@@ -21,6 +21,17 @@ The roadmap is intentionally gated. Each phase is independently implemented, tes
 | 12 | Analytics, crash monitoring and WAPCentral app integration | Privacy/failure tests | Completed (Pending Approval) |
 | 13 | Performance hardening and release | Full release gate | Completed (Pending Approval) |
 
+## Remediation Sprints (Pre-Release Audit)
+
+| Sprint | Focus | Audit Findings | Status |
+|---|---|---|---|
+| Sprint 1 | Absolute Release Gate | P0-01 (Signing), P0-06 (Backup Exclusion), P0-12 (ZIP Traversal), Finding 15 (Secrets) | Completed (Pending Approval) |
+| Sprint 2 | Vault Security | P0-02 (AES-GCM), P0-03 (Biometrics), P0-04 (PIN), P0-05 (Manifest), P0-07 (FLAG_SECURE) | Pending |
+| Sprint 3 | Billing & Ads | P0-08 (In-App Billing), P0-09 (Ad SDKs) | Pending |
+| Sprint 4 | Local AI / OCR | P0-10 (Genuine OCR) | Pending |
+| Sprint 5 | Cloud Provider Integrity | P0-11 (Cloud Providers) | Pending |
+| Sprint 6 | Full Production Regression | Play Store compliance, performance, 100k+ file regression | Pending |
+
 ## Mandatory phase workflow
 
 **IMPLEMENT → TEST → FIX → REVIEW → DOCUMENT → GIT COMMIT → GIT PUSH → STOP**
