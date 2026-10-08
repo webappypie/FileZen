@@ -19,7 +19,7 @@ The roadmap is intentionally gated. Each phase is independently implemented, tes
 | 10 | Notifications Center | Notification and offline tests | Completed (Pending Approval) |
 | 11 | Network transfer and cloud sources | Protocol/integration tests | Completed (Pending Approval) |
 | 12 | Analytics, crash monitoring and WAPCentral app integration | Privacy/failure tests | Completed (Pending Approval) |
-| 13 | Performance hardening and release | Full release gate |
+| 13 | Performance hardening and release | Full release gate | Completed (Pending Approval) |
 
 ## Mandatory phase workflow
 
