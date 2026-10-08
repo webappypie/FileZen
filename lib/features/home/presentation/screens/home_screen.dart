@@ -6,6 +6,7 @@ import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
 import '../../../../domain/repositories/i_wap_service.dart';
+import '../../../clean/presentation/screens/storage_analysis_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -118,65 +119,85 @@ class HomeScreen extends ConsumerWidget {
     const freeBytes = totalBytes - usedBytes;
     const usedRatio = usedBytes / totalBytes;
 
-    return Card(
-      child: Padding(
-        padding: AppSpacing.cardPadding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Internal Storage',
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const StorageAnalysisScreen()),
+        );
+      },
+      borderRadius: AppSpacing.roundedMd,
+      child: Card(
+        child: Padding(
+          padding: AppSpacing.cardPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Internal Storage',
+                        style: AppTypography.labelLarge.copyWith(
+                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        '${Formatters.formatFileSize(usedBytes)} used of ${Formatters.formatFileSize(totalBytes)}',
+                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: AppSpacing.roundedSm,
+                    ),
+                    child: Text(
+                      '${(usedRatio * 100).toInt()}%',
                       style: AppTypography.labelLarge.copyWith(
-                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      '${Formatters.formatFileSize(usedBytes)} used of ${Formatters.formatFileSize(totalBytes)}',
-                      style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.12),
-                    borderRadius: AppSpacing.roundedSm,
                   ),
-                  child: Text(
-                    '${(usedRatio * 100).toInt()}%',
-                    style: AppTypography.labelLarge.copyWith(
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              ClipRRect(
+                borderRadius: AppSpacing.roundedSm,
+                child: LinearProgressIndicator(
+                  value: usedRatio,
+                  minHeight: 8,
+                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${Formatters.formatFileSize(freeBytes)} free available space',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                    ),
+                  ),
+                  Text(
+                    'Analysis →',
+                    style: AppTypography.labelSmall.copyWith(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            ClipRRect(
-              borderRadius: AppSpacing.roundedSm,
-              child: LinearProgressIndicator(
-                value: usedRatio,
-                minHeight: 8,
-                backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
-                valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                ],
               ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              '${Formatters.formatFileSize(freeBytes)} free available space',
-              style: AppTypography.bodySmall.copyWith(
-                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

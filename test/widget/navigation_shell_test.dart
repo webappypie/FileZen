@@ -1,7 +1,9 @@
 import 'package:filezen/app/bootstrap/app_bootstrap.dart';
 import 'package:filezen/domain/models/storage_location.dart';
 import 'package:filezen/domain/repositories/i_permission_service.dart';
+import 'package:filezen/domain/models/storage_intelligence_models.dart';
 import 'package:filezen/features/ai/presentation/providers/ai_providers.dart';
+import 'package:filezen/features/clean/presentation/providers/clean_providers.dart';
 import 'package:filezen/features/files/presentation/providers/storage_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,6 +36,18 @@ void main() {
             (ref) => Future.value([fakeLocation]),
           ),
           smartCollectionsProvider.overrideWith(
+            (ref) => Future.value([]),
+          ),
+          storageOverviewProvider.overrideWith(
+            (ref) => Future.value(const StorageOverview(
+              totalBytes: 128 * 1024 * 1024 * 1024,
+              usedBytes: 46 * 1024 * 1024 * 1024,
+              freeBytes: 82 * 1024 * 1024 * 1024,
+              categorySizes: {},
+              categoryCounts: {},
+            )),
+          ),
+          cleanupOpportunitiesProvider.overrideWith(
             (ref) => Future.value([]),
           ),
         ],
