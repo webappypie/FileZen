@@ -6,6 +6,8 @@ import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../app/theme/theme_provider.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
+import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
+import '../../../transfer/presentation/screens/network_hub_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -93,6 +95,47 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+
+          // Network & Cloud Sources
+          Text(
+            'Network & Cloud Sources',
+            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.wifi_tethering_rounded, color: AppColors.primary),
+                  title: const Text('Wi-Fi Web Share & LAN Transfer'),
+                  subtitle: const Text('Direct browser transfer, SMB, FTP, SFTP, and WebDAV.'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NetworkHubScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.cloud_queue_rounded, color: AppColors.accent),
+                  title: const Text('Cloud Storage Accounts'),
+                  subtitle: const Text('Google Drive, OneDrive, Dropbox, and Box.'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const CloudSourcesScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
           const SizedBox(height: AppSpacing.lg),

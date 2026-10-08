@@ -7,6 +7,8 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
 import '../../../../domain/repositories/i_wap_service.dart';
 import '../../../clean/presentation/screens/storage_analysis_screen.dart';
+import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
+import '../../../transfer/presentation/screens/network_hub_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -70,6 +72,10 @@ class HomeScreen extends ConsumerWidget {
 
                   // Ask Your Files Entry Point
                   _buildAskYourFilesCard(context, isDark),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Network Transfer & Cloud Sources Section
+                  _buildNetworkCloudSection(context, isDark),
                   const SizedBox(height: AppSpacing.xl),
                 ],
               ),
@@ -343,6 +349,138 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildNetworkCloudSection(BuildContext context, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Network & Cloud',
+              style: AppTypography.titleMedium.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              'LAN • SMB • Cloud',
+              style: AppTypography.labelSmall.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: Card(
+                child: InkWell(
+                  borderRadius: AppSpacing.roundedMd,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NetworkHubScreen(),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: AppSpacing.cardPadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.wifi_tethering_rounded,
+                            color: AppColors.primary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Wi-Fi Share & LAN',
+                          style: AppTypography.titleMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Browser link & SMB',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Card(
+                child: InkWell(
+                  borderRadius: AppSpacing.roundedMd,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const CloudSourcesScreen(),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: AppSpacing.cardPadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.cloud_queue_rounded,
+                            color: AppColors.accent,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Cloud Drives',
+                          style: AppTypography.titleMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Drive, OneDrive, Box',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

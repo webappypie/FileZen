@@ -28,6 +28,8 @@ import '../../../media/presentation/widgets/mini_audio_player_bar.dart';
 import '../../../search/presentation/providers/search_providers.dart';
 import '../../../ai/presentation/providers/ai_providers.dart';
 import '../../../ai/presentation/widgets/related_files_sheet.dart';
+import '../../../transfer/presentation/providers/network_providers.dart';
+import '../../../transfer/presentation/screens/network_hub_screen.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
 
@@ -154,6 +156,20 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           icon: const Icon(Icons.drive_file_rename_outline_rounded),
           tooltip: 'Batch Rename',
           onPressed: () => _showBatchRenameDialog(context, selectedFiles),
+        ),
+        IconButton(
+          icon: const Icon(Icons.wifi_tethering_rounded),
+          tooltip: 'Share via Wi-Fi Web Share',
+          onPressed: () {
+            ref
+                .read(networkTransferControllerProvider.notifier)
+                .setSharedFiles(selectedFiles.map((f) => f.path).toList());
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const NetworkHubScreen(initialTabIndex: 0),
+              ),
+            );
+          },
         ),
         IconButton(
           icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
