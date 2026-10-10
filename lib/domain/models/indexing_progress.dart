@@ -20,6 +20,13 @@ class IndexingProgress {
   final Duration elapsedTime;
   final String? errorMessage;
 
+  /// Images still waiting for on-device OCR (deferred to a later run when the
+  /// device is on battery saver, low battery or thermally throttled).
+  final int pendingOcrCount;
+
+  /// Index entries removed because their files no longer exist.
+  final int removedCount;
+
   const IndexingProgress({
     this.status = IndexingStatus.idle,
     this.totalFilesDiscovered = 0,
@@ -29,10 +36,16 @@ class IndexingProgress {
     this.currentPath,
     this.elapsedTime = Duration.zero,
     this.errorMessage,
+    this.pendingOcrCount = 0,
+    this.removedCount = 0,
   });
 
+  /// A paused scan is still in progress (it resumes in place), so a second scan
+  /// must not start alongside it.
   bool get isRunning =>
-      status == IndexingStatus.scanning || status == IndexingStatus.indexing;
+      status == IndexingStatus.scanning ||
+      status == IndexingStatus.indexing ||
+      status == IndexingStatus.paused;
 
   double get progressFraction {
     if (totalFilesDiscovered == 0) return 0.0;
@@ -54,6 +67,8 @@ class IndexingProgress {
     String? currentPath,
     Duration? elapsedTime,
     String? errorMessage,
+    int? pendingOcrCount,
+    int? removedCount,
   }) {
     return IndexingProgress(
       status: status ?? this.status,
@@ -64,6 +79,8 @@ class IndexingProgress {
       currentPath: currentPath ?? this.currentPath,
       elapsedTime: elapsedTime ?? this.elapsedTime,
       errorMessage: errorMessage ?? this.errorMessage,
+      pendingOcrCount: pendingOcrCount ?? this.pendingOcrCount,
+      removedCount: removedCount ?? this.removedCount,
     );
   }
 

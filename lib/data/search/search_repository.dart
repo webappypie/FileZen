@@ -27,6 +27,34 @@ class SearchRepository implements ISearchRepository {
 
   SearchRepository(this._db);
 
+  /// Most relevant FTS matches returned for one query. Without a cap a short
+  /// prefix query ("a*") on a 100k-file index materialised every row.
+  static const int maxResults = 500;
+  static const int _idChunk = 400;
+
+  Future<List<_FtsMatch>> _ftsSearch(String ftsQuery, String? category) async {
+    final rows = await _db.customSelect(
+      'SELECT file_id, bm25(search_documents) AS rank, '
+      "snippet(search_documents, 3, '[match]', '[/match]', '...', 15) AS snippet "
+      'FROM search_documents WHERE search_documents MATCH ?'
+      '${category != null ? ' AND category = ?' : ''} '
+      'ORDER BY rank LIMIT ?',
+      variables: [
+        Variable<String>(ftsQuery),
+        if (category != null) Variable<String>(category),
+        Variable<int>(maxResults),
+      ],
+      readsFrom: {_db.searchDocuments},
+    ).get();
+    return rows
+        .map((r) => _FtsMatch(
+              fileId: r.read<String>('file_id'),
+              snippet: r.readNullable<String>('snippet'),
+              rank: r.read<double>('rank'),
+            ))
+        .toList();
+  }
+
   @override
   Future<Result<List<SearchResultItem>>> search(SearchQuery query) async {
     try {
@@ -40,29 +68,21 @@ class SearchRepository implements ISearchRepository {
         }
 
         final category = query.category?.displayName;
-        final List<_FtsMatch> ftsResults;
-
-        if (category != null) {
-          final res = await _db.searchFtsWithCategory(ftsQuery, category).get();
-          ftsResults = res
-              .map((r) => _FtsMatch(fileId: r.fileId, snippet: r.snippet, rank: r.rank))
-              .toList();
-        } else {
-          final res = await _db.searchFts(ftsQuery).get();
-          ftsResults = res
-              .map((r) => _FtsMatch(fileId: r.fileId, snippet: r.snippet, rank: r.rank))
-              .toList();
-        }
+        final ftsResults = await _ftsSearch(ftsQuery, category);
 
         if (ftsResults.isEmpty) {
           return Result.success([]);
         }
 
-        // Batch fetch matching FileRecords
+        // Fetch matching records in bounded chunks (SQLite caps bound variables).
         final fileIds = ftsResults.map((r) => r.fileId).toList();
-        final records = await (_db.select(_db.fileRecords)
-              ..where((t) => t.id.isIn(fileIds)))
-            .get();
+        final records = <FileRecord>[];
+        for (var i = 0; i < fileIds.length; i += _idChunk) {
+          final chunk = fileIds.sublist(i, (i + _idChunk).clamp(0, fileIds.length));
+          records.addAll(
+            await (_db.select(_db.fileRecords)..where((t) => t.id.isIn(chunk))).get(),
+          );
+        }
 
         final recordMap = {for (final r in records) r.id: r};
 
@@ -124,7 +144,10 @@ class SearchRepository implements ISearchRepository {
           queryBuilder = queryBuilder..where((t) => t.size.isSmallerOrEqualValue(BigInt.from(query.maxSize!)));
         }
 
-        final records = await (queryBuilder..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)])).get();
+        final records = await (queryBuilder
+              ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)])
+              ..limit(maxResults))
+            .get();
 
         final items = records.map((record) {
           final entity = FileEntity(

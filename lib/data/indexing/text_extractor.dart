@@ -24,8 +24,25 @@ class TextExtractor {
     'env', 'conf', 'config', 'ini', 'properties'
   };
 
-  /// Extracts searchable textual content from a FileEntity, including on-device OCR for images.
-  Future<String> extractContent(FileEntity entity) async {
+  /// Whether images can be OCR'd on this platform.
+  Future<bool> get isOcrAvailable async => await _ocrService?.isOcrAvailable() ?? false;
+
+  /// On-device OCR text of an image ('' when none or unavailable).
+  Future<String> extractOcrText(FileEntity entity) async {
+    if (entity.category != FileCategory.image || _ocrService == null) return '';
+    try {
+      final ocrResult = await _ocrService.extractTextFromImage(entity.path);
+      return ocrResult.hasText ? _cleanText(ocrResult.extractedText) : '';
+    } catch (e) {
+      AppLogger.warning('OCR indexing failed for ${entity.path}: $e', 'TextExtractor');
+      return '';
+    }
+  }
+
+  /// Extracts searchable textual content from a FileEntity, including on-device
+  /// OCR for images unless [includeOcr] is false (the indexer runs OCR in a
+  /// separate, deferrable pass).
+  Future<String> extractContent(FileEntity entity, {bool includeOcr = true}) async {
     final cleanExt = entity.extension.toLowerCase().replaceAll('.', '');
 
     // For supported text files, read head bytes asynchronously
@@ -47,7 +64,7 @@ class TextExtractor {
     buffer.write(_generateMetadataTokens(entity));
 
     // For images, extract on-device OCR text tokens to index in FTS5
-    if (entity.category == FileCategory.image && _ocrService != null) {
+    if (includeOcr && entity.category == FileCategory.image && _ocrService != null) {
       try {
         final ocrResult = await _ocrService.extractTextFromImage(entity.path);
         if (ocrResult.hasText) {

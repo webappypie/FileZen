@@ -22,8 +22,14 @@ class OcrService implements IOcrService {
 
   bool get _mlKitUsable => Platform.isAndroid || Platform.isIOS || _customRecognizer != null;
 
+  /// One Latin recognizer for the app's lifetime. Creating and closing a
+  /// native recognizer per image (previous behaviour) re-loaded the model for
+  /// every photo during indexing.
+  static TextRecognizer? _sharedRecognizer;
+
   TextRecognizer _createRecognizer() {
-    return _customRecognizer ?? TextRecognizer(script: TextRecognitionScript.latin);
+    return _customRecognizer ??
+        (_sharedRecognizer ??= TextRecognizer(script: TextRecognitionScript.latin));
   }
 
   @override
@@ -43,10 +49,9 @@ class OcrService implements IOcrService {
     final file = File(imagePath);
     if (!await file.exists() || await file.length() == 0) return _empty(imagePath);
 
-    TextRecognizer? recognizer;
     try {
       final inputImage = InputImage.fromFilePath(imagePath);
-      recognizer = _createRecognizer();
+      final recognizer = _createRecognizer();
       final RecognizedText recognizedText = await recognizer.processImage(inputImage);
 
       final lines = <String>[];
@@ -91,10 +96,6 @@ class OcrService implements IOcrService {
     } catch (e) {
       AppLogger.warning('ML Kit OCR extraction error for $imagePath: $e', 'OcrService');
       return _empty(imagePath);
-    } finally {
-      if (_customRecognizer == null && recognizer != null) {
-        await recognizer.close();
-      }
     }
   }
 }

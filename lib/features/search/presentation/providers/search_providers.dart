@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../data/database/database_provider.dart';
 import '../../../../data/indexing/indexing_service.dart';
 import '../../../../data/search/search_repository.dart';
+import '../../../../data/system/device_conditions_service.dart';
 import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/file_operation_models.dart';
 import '../../../../domain/models/indexing_progress.dart';
@@ -22,7 +25,12 @@ final searchRepositoryProvider = Provider<ISearchRepository>((ref) {
 final indexingServiceProvider = Provider<IIndexingService>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final storageRepo = ref.watch(storageRepositoryProvider);
-  return IndexingService(db: db, storageRepo: storageRepo);
+  final conditions = DeviceConditionsService();
+  return IndexingService(
+    db: db,
+    storageRepo: storageRepo,
+    heavyWorkAllowed: conditions.heavyWorkAllowed,
+  );
 });
 
 /// Active search text input.
@@ -72,10 +80,11 @@ class IndexingProgressNotifier extends StateNotifier<IndexingProgress> {
   final IIndexingService _service;
   final Ref _ref;
   CancellationToken? _cancellationToken;
+  late final StreamSubscription<IndexingProgress> _subscription;
 
   IndexingProgressNotifier(this._service, this._ref)
       : super(const IndexingProgress()) {
-    _service.progressStream.listen((progress) {
+    _subscription = _service.progressStream.listen((progress) {
       state = progress;
       if (progress.status == IndexingStatus.completed) {
         _ref.invalidate(indexedCountProvider);
@@ -96,6 +105,12 @@ class IndexingProgressNotifier extends StateNotifier<IndexingProgress> {
 
   void cancelIndexing() {
     _cancellationToken?.cancel();
+  }
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
   }
 
   void pauseIndexing() {

@@ -31,12 +31,13 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
+          await _createPerformanceSchema();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -53,8 +54,87 @@ class AppDatabase extends _$AppDatabase {
               );
             ''');
           }
+          if (from < 3) {
+            await _createPerformanceSchema();
+            // Map every existing FTS row once so later deletes never scan.
+            await customStatement(
+              'INSERT OR REPLACE INTO search_doc_rowids (file_id, doc_rowid) '
+              'SELECT file_id, rowid FROM search_documents',
+            );
+          }
         },
       );
+
+  /// Schema v3: lookup indexes (every incremental-index check filters by path,
+  /// category lists filter by category and sort by date, Storage Intelligence
+  /// sorts by size) and a file_id -> FTS rowid map. `file_id` is an UNINDEXED
+  /// FTS5 column, so `DELETE ... WHERE file_id = ?` scanned the whole FTS table
+  /// on every re-index; deleting by rowid is a direct lookup.
+  Future<void> _createPerformanceSchema() async {
+    await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_file_records_path ON file_records (path)');
+    await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_file_records_category_modified ON file_records (category, modified_at)');
+    await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_file_records_modified ON file_records (modified_at)');
+    await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_file_records_size ON file_records (size)');
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS search_doc_rowids ('
+      'file_id TEXT NOT NULL PRIMARY KEY, doc_rowid INTEGER NOT NULL)',
+    );
+    // Which image versions already went through OCR, so unchanged photos are
+    // never recognised twice.
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS ocr_state ('
+      'path TEXT NOT NULL PRIMARY KEY, size INTEGER NOT NULL, modified_ms INTEGER NOT NULL)',
+    );
+  }
+
+  @override
+  Future<int> insertSearchDocument(
+    String fileId,
+    String name,
+    String path,
+    String content,
+    String tags,
+    String category,
+  ) async {
+    final rowId = await super.insertSearchDocument(fileId, name, path, content, tags, category);
+    await customStatement(
+      'INSERT OR REPLACE INTO search_doc_rowids (file_id, doc_rowid) VALUES (?, ?)',
+      [fileId, rowId],
+    );
+    return rowId;
+  }
+
+  @override
+  Future<int> deleteSearchDocumentByFileId(String fileId) async {
+    final mapped = await customSelect(
+      'SELECT doc_rowid FROM search_doc_rowids WHERE file_id = ?',
+      variables: [Variable<String>(fileId)],
+    ).get();
+    var deleted = 0;
+    for (final row in mapped) {
+      deleted += await customUpdate(
+        'DELETE FROM search_documents WHERE rowid = ?',
+        variables: [Variable<int>(row.read<int>('doc_rowid'))],
+        updates: {searchDocuments},
+        updateKind: UpdateKind.delete,
+      );
+    }
+    if (mapped.isNotEmpty) {
+      await customStatement('DELETE FROM search_doc_rowids WHERE file_id = ?', [fileId]);
+    }
+    return deleted;
+  }
+
+  @override
+  Future<int> clearSearchDocuments() async {
+    final cleared = await super.clearSearchDocuments();
+    await customStatement('DELETE FROM search_doc_rowids');
+    return cleared;
+  }
 
   static QueryExecutor _openConnection() {
     return driftDatabase(
