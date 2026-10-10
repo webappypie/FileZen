@@ -9,6 +9,7 @@ import '../../../../core/widgets/file_thumbnail_widget.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
 import '../../../../domain/models/ai_models.dart';
 import '../../../../domain/models/file_category.dart';
+import '../../../../domain/models/file_entity.dart';
 import '../../../../domain/repositories/i_wap_service.dart';
 import '../../../ai/presentation/providers/ai_providers.dart';
 import '../../../ai/presentation/screens/collection_detail_screen.dart';
@@ -56,6 +57,26 @@ class HomeScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _buildCategoriesGrid(context, ref, isDark),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // Recently modified and favorite files (from the index)
+                  _buildFileStrip(
+                    context,
+                    ref,
+                    title: 'Recent Files',
+                    kind: FileListKind.recent,
+                    filesAsync: ref.watch(recentFilesProvider),
+                    emptyText: 'Files appear here as FileZen indexes your storage.',
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _buildFileStrip(
+                    context,
+                    ref,
+                    title: 'Favorites',
+                    kind: FileListKind.favorites,
+                    filesAsync: ref.watch(favoriteFilesProvider),
+                    emptyText: 'Use “Add to Favorites” in a file’s menu to pin it here.',
+                  ),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Smart Collections Section
@@ -320,6 +341,76 @@ class HomeScreen extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+
+  /// Horizontal strip of indexed files with "See all" to the full list.
+  Widget _buildFileStrip(
+    BuildContext context,
+    WidgetRef ref, {
+    required String title,
+    required FileListKind kind,
+    required AsyncValue<List<FileEntity>> filesAsync,
+    required String emptyText,
+  }) {
+    final files = filesAsync.valueOrNull ?? const <FileEntity>[];
+    void openAll() => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => CategoryFilesScreen(categoryTitle: title, listKind: kind)),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title, style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700)),
+            if (files.isNotEmpty) TextButton(onPressed: openAll, child: const Text('See all')),
+          ],
+        ),
+        if (filesAsync.isLoading && files.isEmpty)
+          // Static like the category counts ('...'): an index query is quick.
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Text('Loading…', style: AppTypography.bodySmall),
+          )
+        else if (files.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Text(emptyText, style: AppTypography.bodySmall),
+          )
+        else
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: files.length.clamp(0, 12),
+              separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                final file = files[index];
+                return InkWell(
+                  borderRadius: AppSpacing.roundedSm,
+                  onTap: () => FileViewerResolver.openFile(context, ref, file, files),
+                  child: SizedBox(
+                    width: 72,
+                    child: Column(
+                      children: [
+                        FileThumbnailWidget(file: file, size: 64),
+                        const SizedBox(height: 4),
+                        Text(
+                          file.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 

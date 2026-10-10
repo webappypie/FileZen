@@ -173,4 +173,23 @@ void main() {
     print('2,000 files: first scan ${firstMs}ms, unchanged re-scan ${secondMs}ms');
     expect(secondMs, lessThan(firstMs), reason: 'unchanged files must not be re-processed');
   });
+
+  test('favorites survive edits (new row id) and are listed; recent is newest first', () async {
+    final a = File(p.join(tempDir.path, 'a.txt'))..writeAsStringSync('one');
+    final b = File(p.join(tempDir.path, 'b.txt'))..writeAsStringSync('two');
+    await a.setLastModified(DateTime(2026, 1, 1));
+    await b.setLastModified(DateTime(2026, 2, 1));
+    await indexer().runIndexScan(targetPaths: [tempDir.path]);
+
+    expect(await db.setFavorite(a.path, true), 1);
+    a.writeAsStringSync('one, now longer'); // size changes -> new row id
+    await a.setLastModified(DateTime(2026, 3, 1));
+    await indexer().runIndexScan(targetPaths: [tempDir.path]);
+
+    expect((await db.getFavoriteFiles()).map((r) => r.path), [a.path]);
+    expect((await db.getRecentFiles()).map((r) => r.path), [a.path, b.path]);
+
+    await db.setFavorite(a.path, false);
+    expect(await db.getFavoriteFiles(), isEmpty);
+  });
 }

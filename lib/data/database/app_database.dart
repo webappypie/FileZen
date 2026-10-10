@@ -204,4 +204,26 @@ class AppDatabase extends _$AppDatabase {
           ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)]))
         .get();
   }
+
+  /// Most recently modified indexed files (uses idx_file_records_modified).
+  Future<List<FileRecord>> getRecentFiles({int limit = 20}) {
+    return (select(fileRecords)
+          ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)])
+          ..limit(limit))
+        .get();
+  }
+
+  /// Files the user marked as favorites, newest first.
+  Future<List<FileRecord>> getFavoriteFiles() {
+    return (select(fileRecords)
+          ..where((t) => t.isFavorite.equals(true))
+          ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)]))
+        .get();
+  }
+
+  /// Marks or unmarks every index row of [path]; returns rows changed.
+  Future<int> setFavorite(String path, bool favorite) {
+    return (update(fileRecords)..where((t) => t.path.equals(path)))
+        .write(FileRecordsCompanion(isFavorite: Value(favorite)));
+  }
 }

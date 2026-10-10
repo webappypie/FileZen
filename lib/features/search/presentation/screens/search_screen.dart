@@ -14,6 +14,8 @@ import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/indexing_progress.dart';
 import '../../../../domain/models/search_result_item.dart';
 import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../files/presentation/providers/category_files_providers.dart';
+import '../../../files/presentation/services/favorites.dart';
 import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../providers/search_providers.dart';
 
@@ -352,6 +354,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           FileViewerResolver.openFile(context, ref, file);
                         case 'details':
                           _showFileDetailsDialog(context, result);
+                        case 'favorite':
+                          Favorites.setFavorite(ref, file, !isFavoriteEntity(file));
                         case 'vault':
                           VaultActionCoordinator.moveFileToVault(
                             context,
@@ -361,10 +365,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           );
                       }
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'open', child: Text('Open')),
-                      PopupMenuItem(value: 'details', child: Text('Details')),
-                      PopupMenuItem(value: 'vault', child: Text('Move to Vault')),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'open', child: Text('Open')),
+                      const PopupMenuItem(value: 'details', child: Text('Details')),
+                      PopupMenuItem(
+                        value: 'favorite',
+                        child: Text(isFavoriteEntity(file) ? 'Remove from Favorites' : 'Add to Favorites'),
+                      ),
+                      const PopupMenuItem(value: 'vault', child: Text('Move to Vault')),
                     ],
                   ),
                 ],

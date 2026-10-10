@@ -13,6 +13,7 @@ import '../../../../domain/models/file_sort_criteria.dart';
 import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../providers/category_files_providers.dart';
 import '../resolvers/file_viewer_resolver.dart';
+import '../services/favorites.dart';
 import '../services/file_deletion.dart';
 
 /// Generic category result screen displaying indexed files for a given category.
@@ -23,11 +24,15 @@ class CategoryFilesScreen extends ConsumerStatefulWidget {
     this.category,
     required this.categoryTitle,
     this.isDownloads = false,
+    this.listKind,
   });
 
   final FileCategory? category;
   final String categoryTitle;
   final bool isDownloads;
+
+  /// Shows Recent files or Favorites instead of a category.
+  final FileListKind? listKind;
 
   @override
   ConsumerState<CategoryFilesScreen> createState() => _CategoryFilesScreenState();
@@ -95,7 +100,11 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
   @override
   Widget build(BuildContext context) {
     final query = (category: widget.category, isDownloads: widget.isDownloads);
-    final filesAsync = ref.watch(categoryFilesListProvider(query));
+    final filesAsync = switch (widget.listKind) {
+      FileListKind.recent => ref.watch(recentFilesProvider),
+      FileListKind.favorites => ref.watch(favoriteFilesProvider),
+      null => ref.watch(categoryFilesListProvider(query)),
+    };
     final isSelectionMode = _selectedPaths.isNotEmpty;
 
     return Scaffold(
@@ -242,9 +251,7 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
               selectedFiles,
               onSuccess: () {
                 setState(() => _selectedPaths.clear());
-                final query = (category: widget.category, isDownloads: widget.isDownloads);
-                ref.invalidate(categoryFilesListProvider(query));
-                ref.invalidate(categoryFileCountsProvider);
+                _refreshLists();
               },
             );
           },
@@ -300,6 +307,10 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
                           Text('Move to Vault', style: TextStyle(color: AppColors.typeVault)),
                         ],
                       ),
+                    ),
+                    PopupMenuItem(
+                      value: 'favorite',
+                      child: Text(isFavoriteEntity(file) ? 'Remove from Favorites' : 'Add to Favorites'),
                     ),
                     const PopupMenuItem(value: 'details', child: Text('Properties')),
                     const PopupMenuItem(
@@ -415,12 +426,19 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
           context,
           ref,
           [file],
-          onSuccess: () {
-            final query = (category: widget.category, isDownloads: widget.isDownloads);
-            ref.invalidate(categoryFilesListProvider(query));
-            ref.invalidate(categoryFileCountsProvider);
-          },
+          onSuccess: _refreshLists,
         );
+        break;
+      case 'favorite':
+        final makeFavorite = !isFavoriteEntity(file);
+        final ok = await Favorites.setFavorite(ref, file, makeFavorite);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(!ok
+                ? 'Could not update favorites'
+                : (makeFavorite ? 'Added to Favorites' : 'Removed from Favorites')),
+          ));
+        }
         break;
       case 'details':
         _showPropertiesDialog(context, file);
@@ -429,6 +447,14 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
         _confirmBatchDelete(context, [file]);
         break;
     }
+  }
+
+  /// After files leave (Vault move): every index-backed list may have changed.
+  void _refreshLists() {
+    ref.invalidate(categoryFilesListProvider);
+    ref.invalidate(recentFilesProvider);
+    ref.invalidate(favoriteFilesProvider);
+    ref.invalidate(categoryFileCountsProvider);
   }
 
   void _showPropertiesDialog(BuildContext context, FileEntity file) {

@@ -56,6 +56,8 @@ class FileDeletion {
     if (deleted.isNotEmpty) {
       ref.invalidate(categoryFileCountsProvider);
       ref.invalidate(categoryFilesListProvider);
+      ref.invalidate(recentFilesProvider);
+      ref.invalidate(favoriteFilesProvider);
       ref.invalidate(deviceStorageStatsProvider);
     }
     return FileDeletionResult(deleted, failed);

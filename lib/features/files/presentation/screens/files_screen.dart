@@ -25,6 +25,7 @@ import '../../../transfer/presentation/screens/network_hub_screen.dart';
 import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../../../../core/widgets/file_thumbnail_widget.dart';
 import '../resolvers/file_viewer_resolver.dart';
+import '../services/favorites.dart';
 import '../services/file_deletion.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
@@ -516,6 +517,8 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                       ],
                     ),
                   ),
+                if (!file.isDirectory)
+                  const PopupMenuItem(value: 'favorite', child: Text('Add to / Remove from Favorites')),
                 const PopupMenuItem(value: 'details', child: Text('Properties')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 if (!file.isDirectory)
@@ -608,10 +611,23 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
     FileViewerResolver.openFile(context, ref, file, allFiles);
   }
 
+  Future<void> _toggleFavorite(BuildContext context, FileEntity file) async {
+    final makeFavorite = !await Favorites.isFavorite(ref, file.path);
+    final ok = await Favorites.setFavorite(ref, file, makeFavorite);
+    if (!context.mounted) return;
+    _showSnackBar(
+      context,
+      !ok ? 'Could not update favorites' : (makeFavorite ? 'Added to Favorites' : 'Removed from Favorites'),
+    );
+  }
+
   void _handleFileAction(BuildContext context, FileEntity file, String action, [List<FileEntity>? allItems]) {
     switch (action) {
       case 'open_media':
         _handleFileTap(context, file, allItems ?? [file]);
+        break;
+      case 'favorite':
+        _toggleFavorite(context, file);
         break;
       case 'vault':
         VaultActionCoordinator.moveFileToVault(

@@ -60,6 +60,8 @@ class IndexingCoordinator with WidgetsBindingObserver {
     }
     _ref.invalidate(categoryFileCountsProvider);
     _ref.invalidate(categoryFilesListProvider);
+    _ref.invalidate(recentFilesProvider);
+    _ref.invalidate(favoriteFilesProvider);
     _ref.invalidate(collectionFilesProvider);
     _ref.invalidate(smartCollectionsProvider);
     _ref.invalidate(storageOverviewProvider);

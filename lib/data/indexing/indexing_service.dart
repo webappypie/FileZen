@@ -183,7 +183,7 @@ class IndexingService implements IIndexingService {
 
         final end = (i + batchSize < filesToProcess.length) ? i + batchSize : filesToProcess.length;
         final batch = filesToProcess.sublist(i, end);
-        final pending = <(FileEntity, String, List<String>)>[];
+        final pending = <(FileEntity, String, List<FileRecord>)>[];
 
         for (final file in batch) {
           final existingRows = existingByPath[file.path] ?? const <FileRecord>[];
@@ -196,7 +196,7 @@ class IndexingService implements IIndexingService {
           }
           try {
             final extracted = await _textExtractor.extractContent(file, includeOcr: false);
-            pending.add((file, extracted, existingRows.map((r) => r.id).toList()));
+            pending.add((file, extracted, existingRows));
           } catch (e) {
             AppLogger.warning('Error reading file for index: $e', 'IndexingService');
             errors++;
@@ -206,8 +206,13 @@ class IndexingService implements IIndexingService {
         if (pending.isNotEmpty) {
           try {
             await db.transaction(() async {
-              for (final (file, extracted, replaceIds) in pending) {
-                await _writeIndexRecord(file, extracted, replaceIds: replaceIds);
+              for (final (file, extracted, oldRows) in pending) {
+                await _writeIndexRecord(
+                  file,
+                  extracted,
+                  replaceIds: oldRows.map((r) => r.id).toList(),
+                  favorite: oldRows.any((r) => r.isFavorite),
+                );
               }
             });
             indexed += pending.length;
@@ -341,6 +346,7 @@ class IndexingService implements IIndexingService {
                 file,
                 '$base $ocrText',
                 replaceIds: rows.map((r) => r.id).toList(),
+                favorite: rows.any((r) => r.isFavorite),
               ));
         }
         await db.customStatement(
@@ -424,10 +430,13 @@ class IndexingService implements IIndexingService {
     }
   }
 
+  /// [favorite]: keep the user's favorite mark when an edited file gets a new
+  /// row id (the id embeds the size). Only ever sets the flag, never clears it.
   Future<void> _writeIndexRecord(
     FileEntity file,
     String extractedContent, {
     List<String> replaceIds = const [],
+    bool favorite = false,
   }) async {
     final fileId = 'file_${file.path.hashCode.abs()}_${file.size}';
     final now = DateTime.now();
@@ -454,6 +463,7 @@ class IndexingService implements IIndexingService {
               mimeType: Value(file.mimeType),
               category: Value(file.category.displayName),
               indexedAt: Value(now),
+              isFavorite: favorite ? const Value(true) : const Value.absent(),
             ),
           );
 
@@ -483,6 +493,7 @@ class IndexingService implements IIndexingService {
         file,
         extracted,
         replaceIds: existing.map((r) => r.id).toList(),
+        favorite: existing.any((r) => r.isFavorite),
       );
       return Result.success(null);
     } catch (e) {

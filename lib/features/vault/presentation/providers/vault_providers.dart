@@ -132,6 +132,9 @@ class VaultItemsNotifier extends AsyncNotifier<List<VaultItem>> {
           ..clear()
           ..clearLiveImages();
         ref.invalidate(categoryFileCountsProvider);
+        ref.invalidate(categoryFilesListProvider);
+        ref.invalidate(recentFilesProvider);
+        ref.invalidate(favoriteFilesProvider);
       }
       await refresh();
     }
