@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/services/permission_service.dart';
+import '../../../../data/storage/device_storage_service.dart';
 import '../../../../data/storage/filesystem_storage_repository.dart';
 import '../../../../domain/models/file_entity.dart';
+import '../../../../domain/models/storage_intelligence_models.dart';
 import '../../../../domain/models/storage_location.dart';
 import '../../../../domain/repositories/i_permission_service.dart';
 import '../../../../domain/repositories/i_storage_repository.dart';
@@ -11,9 +13,23 @@ final permissionServiceProvider = Provider<IPermissionService>((ref) {
   return PermissionService();
 });
 
+/// Provider for the OS volume measurement (Android StatFs).
+final deviceStorageServiceProvider = Provider<IDeviceStorageService>((ref) {
+  return DeviceStorageService();
+});
+
+/// The single source of truth for device storage used/free/total.
+///
+/// Home and Storage Intelligence both read this value (Storage Intelligence via
+/// `storageOverviewProvider`), so the same measurement drives every
+/// "% used" label. `null` means the device could not be measured.
+final deviceStorageStatsProvider = FutureProvider<DeviceStorageStats?>((ref) async {
+  return ref.watch(deviceStorageServiceProvider).getStats();
+});
+
 /// Provider for IStorageRepository.
 final storageRepositoryProvider = Provider<IStorageRepository>((ref) {
-  return FilesystemStorageRepository();
+  return FilesystemStorageRepository(deviceStorage: ref.watch(deviceStorageServiceProvider));
 });
 
 /// Provider managing storage permission state.

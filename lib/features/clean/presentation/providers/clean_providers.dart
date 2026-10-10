@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../data/cleanup/deduplication_service.dart';
@@ -50,10 +52,14 @@ final timelineServiceProvider = Provider<ITimelineService>((ref) {
   return TimelineService(db: db, storageRepo: storageRepo);
 });
 
-/// Storage overview provider.
+/// Storage overview provider. Device totals are the shared
+/// [deviceStorageStatsProvider] measurement (the same value the Home card shows).
 final storageOverviewProvider = FutureProvider<StorageOverview>((ref) async {
   final hygieneService = ref.watch(storageHygieneServiceProvider);
-  return await hygieneService.getStorageOverview();
+  final deviceStats = await ref.watch(deviceStorageStatsProvider.future);
+  // Builds the 12-hourly usage history from real measurements only.
+  unawaited(hygieneService.recordCurrentStorageSnapshot(deviceStats: deviceStats));
+  return await hygieneService.getStorageOverview(deviceStats: deviceStats);
 });
 
 /// Storage historical trends provider.
@@ -112,6 +118,7 @@ class TrashItemsNotifier extends AsyncNotifier<List<TrashItem>> {
     final res = await trashService.restoreFromTrash(item);
     if (res.isSuccess) {
       await refresh();
+      ref.invalidate(deviceStorageStatsProvider);
       ref.invalidate(storageOverviewProvider);
       return true;
     }
@@ -123,6 +130,7 @@ class TrashItemsNotifier extends AsyncNotifier<List<TrashItem>> {
     final res = await trashService.batchRestoreFromTrash(items);
     if (res.isSuccess) {
       await refresh();
+      ref.invalidate(deviceStorageStatsProvider);
       ref.invalidate(storageOverviewProvider);
       return true;
     }
@@ -134,6 +142,7 @@ class TrashItemsNotifier extends AsyncNotifier<List<TrashItem>> {
     final res = await trashService.permanentlyDelete(item);
     if (res.isSuccess) {
       await refresh();
+      ref.invalidate(deviceStorageStatsProvider);
       ref.invalidate(storageOverviewProvider);
       return true;
     }
@@ -145,6 +154,7 @@ class TrashItemsNotifier extends AsyncNotifier<List<TrashItem>> {
     final res = await trashService.batchPermanentlyDelete(items);
     if (res.isSuccess) {
       await refresh();
+      ref.invalidate(deviceStorageStatsProvider);
       ref.invalidate(storageOverviewProvider);
       return true;
     }
@@ -156,6 +166,7 @@ class TrashItemsNotifier extends AsyncNotifier<List<TrashItem>> {
     final res = await trashService.emptyTrash();
     if (res.isSuccess) {
       await refresh();
+      ref.invalidate(deviceStorageStatsProvider);
       ref.invalidate(storageOverviewProvider);
       return true;
     }

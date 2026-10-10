@@ -15,6 +15,7 @@ import '../../../ai/presentation/screens/collection_detail_screen.dart';
 import '../../../clean/presentation/screens/storage_analysis_screen.dart';
 import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
 import '../../../files/presentation/providers/category_files_providers.dart';
+import '../../../files/presentation/providers/storage_providers.dart';
 import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
 import '../../../files/presentation/screens/category_files_screen.dart';
 import '../../../monitoring/presentation/widgets/filezen_ad_banner.dart';
@@ -43,7 +44,7 @@ class HomeScreen extends ConsumerWidget {
                   const SizedBox(height: AppSpacing.sm),
 
                   // Storage Intelligence Overview Card
-                  _buildStorageOverviewCard(context, isDark),
+                  _buildStorageOverviewCard(context, ref, isDark),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Quick File Categories
@@ -133,11 +134,27 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildStorageOverviewCard(BuildContext context, bool isDark) {
-    const totalBytes = 128 * 1024 * 1024 * 1024; // 128 GB
-    const usedBytes = 46 * 1024 * 1024 * 1024; // 46 GB
-    const freeBytes = totalBytes - usedBytes;
-    const usedRatio = usedBytes / totalBytes;
+  /// Device storage card. Reads the shared [deviceStorageStatsProvider] — the
+  /// same measurement Storage Intelligence uses — so both screens agree.
+  Widget _buildStorageOverviewCard(BuildContext context, WidgetRef ref, bool isDark) {
+    final statsAsync = ref.watch(deviceStorageStatsProvider);
+    final stats = statsAsync.valueOrNull;
+    final secondary = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+    final tertiary = isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary;
+
+    final String headline;
+    final String footer;
+    if (statsAsync.isLoading && stats == null) {
+      headline = 'Measuring storage…';
+      footer = '';
+    } else if (stats == null) {
+      headline = 'Device storage unavailable';
+      footer = 'Open Analysis for indexed file totals';
+    } else {
+      headline =
+          '${Formatters.formatFileSize(stats.usedBytes)} used of ${Formatters.formatFileSize(stats.totalBytes)}';
+      footer = '${Formatters.formatFileSize(stats.freeBytes)} free';
+    }
 
     return InkWell(
       onTap: () {
@@ -155,43 +172,45 @@ class HomeScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Internal Storage',
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Internal Storage',
+                          style: AppTypography.labelLarge.copyWith(color: secondary),
+                        ),
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          headline,
+                          style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (stats != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: AppSpacing.roundedSm,
+                      ),
+                      child: Text(
+                        '${stats.usedPercentLabel}%',
                         style: AppTypography.labelLarge.copyWith(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        '${Formatters.formatFileSize(usedBytes)} used of ${Formatters.formatFileSize(totalBytes)}',
-                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
-                      borderRadius: AppSpacing.roundedSm,
                     ),
-                    child: Text(
-                      '${(usedRatio * 100).toInt()}%',
-                      style: AppTypography.labelLarge.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: AppSpacing.md),
               ClipRRect(
                 borderRadius: AppSpacing.roundedSm,
                 child: LinearProgressIndicator(
-                  value: usedRatio,
+                  // Indeterminate only while the first measurement is in flight.
+                  value: stats?.usedRatio ?? (statsAsync.isLoading ? null : 0),
                   minHeight: 8,
                   backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
                   valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
@@ -201,10 +220,10 @@ class HomeScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${Formatters.formatFileSize(freeBytes)} free available space',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                  Flexible(
+                    child: Text(
+                      footer,
+                      style: AppTypography.bodySmall.copyWith(color: tertiary),
                     ),
                   ),
                   Text(

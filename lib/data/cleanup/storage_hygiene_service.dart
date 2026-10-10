@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -40,23 +41,15 @@ class StorageHygieneService implements IStorageHygieneService {
     return file;
   }
 
+  /// Device totals come from [deviceStats] (the OS measurement shared with the
+  /// Home card); category totals come from the index only. When the device
+  /// cannot be measured the totals are 0 and [StorageOverview.hasDeviceTotals]
+  /// is false — no nominal capacity is ever substituted.
   @override
-  Future<StorageOverview> getStorageOverview({List<String>? targetPaths}) async {
-    final locations = await storageRepo.getStorageLocations();
-    int totalBytes = 0;
-    int freeBytes = 0;
-
-    for (final loc in locations) {
-      totalBytes += loc.totalBytes;
-      freeBytes += loc.freeBytes;
-    }
-
-    // Default nominal sizes if unpopulated
-    if (totalBytes <= 0) {
-      totalBytes = 128 * 1024 * 1024 * 1024;
-      freeBytes = 64 * 1024 * 1024 * 1024;
-    }
-
+  Future<StorageOverview> getStorageOverview({
+    List<String>? targetPaths,
+    DeviceStorageStats? deviceStats,
+  }) async {
     final categorySizes = <FileCategory, int>{
       for (final cat in FileCategory.values) cat: 0,
     };
@@ -64,142 +57,71 @@ class StorageHygieneService implements IStorageHygieneService {
       for (final cat in FileCategory.values) cat: 0,
     };
 
-    // Attempt to gather file metrics from indexed SQLite records first
-    final records = await db.select(db.fileRecords).get();
-
-    if (records.isNotEmpty) {
-      for (final r in records) {
-        final cat = FileCategory.fromExtension(r.extension, r.mimeType);
-        final size = r.size.toInt();
-        categorySizes[cat] = (categorySizes[cat] ?? 0) + size;
-        categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
-      }
-    } else {
-      // Direct scanning fallback if database index has not yet completed
-      final roots = targetPaths ?? locations.map((l) => l.path).toList();
-      for (final root in roots) {
-        await _scanDirectorySizes(
-          Directory(root),
-          categorySizes,
-          categoryCounts,
-          maxDepth: 3,
-        );
-      }
+    // One aggregate query instead of loading every row into memory.
+    final rows = await db.customSelect(
+      'SELECT category, COUNT(*) AS c, COALESCE(SUM(size), 0) AS s '
+      'FROM file_records GROUP BY category',
+      readsFrom: {db.fileRecords},
+    ).get();
+    for (final row in rows) {
+      final cat = categoryFromDisplayName(row.readNullable<String>('category'));
+      categorySizes[cat] = categorySizes[cat]! + row.read<int>('s');
+      categoryCounts[cat] = categoryCounts[cat]! + row.read<int>('c');
     }
 
-    // Calculate usedBytes as total of categories or totalBytes - freeBytes
-    int measuredCategoryTotal = categorySizes.values.fold(0, (sum, val) => sum + val);
-    int usedBytes = totalBytes - freeBytes;
-    if (usedBytes < measuredCategoryTotal) {
-      usedBytes = measuredCategoryTotal;
-    }
-
+    final stats = deviceStats;
     return StorageOverview(
-      totalBytes: totalBytes,
-      usedBytes: usedBytes,
-      freeBytes: freeBytes,
+      totalBytes: stats?.totalBytes ?? 0,
+      usedBytes: stats?.usedBytes ?? 0,
+      freeBytes: stats?.freeBytes ?? 0,
       categorySizes: categorySizes,
       categoryCounts: categoryCounts,
+      hasDeviceTotals: stats != null,
     );
   }
 
-  Future<void> _scanDirectorySizes(
-    Directory dir,
-    Map<FileCategory, int> categorySizes,
-    Map<FileCategory, int> categoryCounts, {
-    int maxDepth = 3,
-    int currentDepth = 0,
-  }) async {
-    if (currentDepth > maxDepth || !await dir.exists()) return;
-
-    try {
-      final entries = dir.listSync(followLinks: false);
-      for (final entry in entries) {
-        if (entry is File) {
-          try {
-            final ext = p.extension(entry.path);
-            final cat = FileCategory.fromExtension(ext);
-            final size = entry.lengthSync();
-            categorySizes[cat] = (categorySizes[cat] ?? 0) + size;
-            categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
-          } catch (_) {}
-        } else if (entry is Directory) {
-          final name = p.basename(entry.path);
-          if (!name.startsWith('.')) {
-            await _scanDirectorySizes(
-              entry,
-              categorySizes,
-              categoryCounts,
-              maxDepth: maxDepth,
-              currentDepth: currentDepth + 1,
-            );
-          }
-        }
-      }
-    } catch (_) {}
+  /// Maps the `category` column (a [FileCategory.displayName]) back to the enum.
+  static FileCategory categoryFromDisplayName(String? name) {
+    for (final cat in FileCategory.values) {
+      if (cat.displayName == name) return cat;
+    }
+    return FileCategory.other;
   }
 
+  /// Folder totals of indexed files, aggregated in SQL (the parent folder is the
+  /// path up to its last '/').
   @override
   Future<List<FolderStorageItem>> getTopFolders({
     List<String>? targetPaths,
     int limit = 10,
   }) async {
-    final folderSizes = <String, int>{};
-    final folderCounts = <String, int>{};
+    const folderExpr = "rtrim(path, replace(path, '/', ''))";
+    final rows = await db.customSelect(
+      'SELECT $folderExpr AS folder, COUNT(*) AS c, COALESCE(SUM(size), 0) AS s '
+      'FROM file_records GROUP BY folder ORDER BY s DESC LIMIT ?',
+      variables: [Variable.withInt(limit)],
+      readsFrom: {db.fileRecords},
+    ).get();
+    final totalRow = await db.customSelect(
+      'SELECT COALESCE(SUM(size), 0) AS s FROM file_records',
+      readsFrom: {db.fileRecords},
+    ).getSingle();
+    final total = totalRow.read<int>('s');
+    final denominator = total > 0 ? total : 1;
 
-    final records = await db.select(db.fileRecords).get();
-
-    if (records.isNotEmpty) {
-      for (final r in records) {
-        final folderPath = p.dirname(r.path);
-        final size = r.size.toInt();
-        folderSizes[folderPath] = (folderSizes[folderPath] ?? 0) + size;
-        folderCounts[folderPath] = (folderCounts[folderPath] ?? 0) + 1;
+    return rows.map((row) {
+      var folder = row.read<String>('folder');
+      if (folder.length > 1 && folder.endsWith('/')) {
+        folder = folder.substring(0, folder.length - 1);
       }
-    } else {
-      final locations = await storageRepo.getStorageLocations();
-      final roots = targetPaths ?? locations.map((l) => l.path).toList();
-
-      for (final root in roots) {
-        final rootDir = Directory(root);
-        if (await rootDir.exists()) {
-          try {
-            final subDirs = rootDir.listSync().whereType<Directory>();
-            for (final sub in subDirs) {
-              int size = 0;
-              int count = 0;
-              try {
-                for (final entity in sub.listSync(recursive: true, followLinks: false)) {
-                  if (entity is File) {
-                    size += entity.lengthSync();
-                    count++;
-                  }
-                }
-              } catch (_) {}
-              folderSizes[sub.path] = size;
-              folderCounts[sub.path] = count;
-            }
-          } catch (_) {}
-        }
-      }
-    }
-
-    int totalMeasured = folderSizes.values.fold(0, (sum, val) => sum + val);
-    if (totalMeasured == 0) totalMeasured = 1;
-
-    final sortedEntries = folderSizes.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return sortedEntries.take(limit).map((entry) {
-      final path = entry.key;
-      final size = entry.value;
-      final count = folderCounts[path] ?? 0;
+      final size = row.read<int>('s');
+      final name = p.basename(folder);
       return FolderStorageItem(
-        path: path,
-        name: p.basename(path).isEmpty ? path : p.basename(path),
+        path: folder,
+        name: name.isEmpty ? folder : name,
         sizeBytes: size,
-        fileCount: count,
-        percentageOfTotal: (size / totalMeasured * 100.0).clamp(0.0, 100.0),
+        fileCount: row.read<int>('c'),
+        percentageOfTotal: (size / denominator * 100.0).clamp(0.0, 100.0),
       );
     }).toList();
   }
@@ -210,61 +132,29 @@ class StorageHygieneService implements IStorageHygieneService {
     int limit = 20,
     int minSizeBytes = 50 * 1024 * 1024,
   }) async {
-    final records = await db.select(db.fileRecords).get();
+    final query = db.select(db.fileRecords)
+      ..orderBy([(t) => OrderingTerm.desc(t.size)])
+      ..limit(limit);
+    final records = await query.get();
 
-    final entities = <FileEntity>[];
-    if (records.isNotEmpty) {
-      for (final r in records) {
-        final size = r.size.toInt();
-        entities.add(FileEntity(
-          id: r.id,
-          path: r.path,
-          name: r.name,
-          extension: r.extension,
-          size: size,
-          modifiedAt: r.modifiedAt,
-          createdAt: r.createdAt,
-          isDirectory: false,
-          mimeType: r.mimeType,
-          category: FileCategory.fromExtension(r.extension, r.mimeType),
-        ));
-      }
-    } else {
-      final locations = await storageRepo.getStorageLocations();
-      final roots = targetPaths ?? locations.map((l) => l.path).toList();
+    final entities = records
+        .map((r) => FileEntity(
+              id: r.id,
+              path: r.path,
+              name: r.name,
+              extension: r.extension,
+              size: r.size.toInt(),
+              modifiedAt: r.modifiedAt,
+              createdAt: r.createdAt,
+              isDirectory: false,
+              mimeType: r.mimeType,
+              category: FileCategory.fromExtension(r.extension, r.mimeType),
+            ))
+        .toList();
 
-      for (final root in roots) {
-        final dir = Directory(root);
-        if (await dir.exists()) {
-          try {
-            for (final entity in dir.listSync(recursive: true, followLinks: false)) {
-              if (entity is File) {
-                try {
-                  final stat = entity.statSync();
-                  entities.add(FileEntity(
-                    id: entity.path,
-                    path: entity.path,
-                    name: p.basename(entity.path),
-                    extension: p.extension(entity.path),
-                    size: stat.size,
-                    modifiedAt: stat.modified,
-                    createdAt: stat.changed,
-                    isDirectory: false,
-                    category: FileCategory.fromExtension(p.extension(entity.path)),
-                  ));
-                } catch (_) {}
-              }
-            }
-          } catch (_) {}
-        }
-      }
-    }
-
-    // Filter by threshold if matches exist, otherwise sort descending
-    final filtered = entities.where((e) => e.size >= minSizeBytes).toList();
-    final candidates = filtered.isNotEmpty ? filtered : entities;
-    candidates.sort((a, b) => b.size.compareTo(a.size));
-    return candidates.take(limit).toList();
+    // Prefer files above the threshold; if none qualify show the largest anyway.
+    final aboveThreshold = entities.where((e) => e.size >= minSizeBytes).toList();
+    return aboveThreshold.isNotEmpty ? aboveThreshold : entities;
   }
 
   @override
@@ -288,58 +178,34 @@ class StorageHygieneService implements IStorageHygieneService {
       AppLogger.warning('Failed to load storage trends: $e', 'StorageHygiene');
     }
 
-    // Generate baseline historical points leading up to now if unpopulated
-    final now = DateTime.now();
-    const total = 128 * 1024 * 1024 * 1024;
-    return [
-      StorageTrendPoint(
-        timestamp: now.subtract(const Duration(days: 28)),
-        usedBytes: (42.1 * 1024 * 1024 * 1024).toInt(),
-        totalBytes: total,
-        changeDeltaBytes: 0,
-      ),
-      StorageTrendPoint(
-        timestamp: now.subtract(const Duration(days: 21)),
-        usedBytes: (43.4 * 1024 * 1024 * 1024).toInt(),
-        totalBytes: total,
-        changeDeltaBytes: (1.3 * 1024 * 1024 * 1024).toInt(),
-      ),
-      StorageTrendPoint(
-        timestamp: now.subtract(const Duration(days: 14)),
-        usedBytes: (44.8 * 1024 * 1024 * 1024).toInt(),
-        totalBytes: total,
-        changeDeltaBytes: (1.4 * 1024 * 1024 * 1024).toInt(),
-      ),
-      StorageTrendPoint(
-        timestamp: now.subtract(const Duration(days: 7)),
-        usedBytes: (45.6 * 1024 * 1024 * 1024).toInt(),
-        totalBytes: total,
-        changeDeltaBytes: (800 * 1024 * 1024).toInt(),
-      ),
-      StorageTrendPoint(
-        timestamp: now,
-        usedBytes: (46.2 * 1024 * 1024 * 1024).toInt(),
-        totalBytes: total,
-        changeDeltaBytes: (600 * 1024 * 1024).toInt(),
-      ),
-    ];
+    // No history recorded yet: report none rather than inventing points.
+    return const [];
   }
 
-  @override
-  Future<void> recordCurrentStorageSnapshot({List<String>? targetPaths}) async {
-    try {
-      final overview = await getStorageOverview(targetPaths: targetPaths);
-      final trends = await getStorageTrends();
+  /// Minimum spacing between recorded trend points.
+  static const snapshotInterval = Duration(hours: 12);
 
-      int delta = 0;
-      if (trends.isNotEmpty) {
-        delta = overview.usedBytes - trends.last.usedBytes;
+  /// Appends a point of *device* usage. Skipped when the device cannot be
+  /// measured or when the previous point is newer than [snapshotInterval].
+  @override
+  Future<void> recordCurrentStorageSnapshot({
+    List<String>? targetPaths,
+    DeviceStorageStats? deviceStats,
+  }) async {
+    final stats = deviceStats;
+    if (stats == null) return;
+    try {
+      final trends = await getStorageTrends();
+      if (trends.isNotEmpty &&
+          stats.measuredAt.difference(trends.last.timestamp) < snapshotInterval) {
+        return;
       }
 
+      final delta = trends.isNotEmpty ? stats.usedBytes - trends.last.usedBytes : 0;
       final newPoint = StorageTrendPoint(
-        timestamp: DateTime.now(),
-        usedBytes: overview.usedBytes,
-        totalBytes: overview.totalBytes,
+        timestamp: stats.measuredAt,
+        usedBytes: stats.usedBytes,
+        totalBytes: stats.totalBytes,
         changeDeltaBytes: delta,
       );
 
@@ -350,7 +216,7 @@ class StorageHygieneService implements IStorageHygieneService {
       final file = await _getTrendsFile();
       final jsonStr = jsonEncode(trimmed.map((p) => p.toJson()).toList());
       await file.writeAsString(jsonStr, flush: true);
-      AppLogger.info('Recorded storage snapshot: ${overview.usedBytes} bytes', 'StorageHygiene');
+      AppLogger.info('Recorded storage snapshot', 'StorageHygiene');
     } catch (e) {
       AppLogger.error('Failed to record storage snapshot: $e', 'StorageHygiene');
     }

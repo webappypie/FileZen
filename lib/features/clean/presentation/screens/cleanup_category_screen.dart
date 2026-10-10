@@ -8,6 +8,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/empty_view.dart';
 import '../../../../domain/models/cleanup_models.dart';
 import '../../../../domain/models/file_entity.dart';
+import '../../../files/presentation/providers/storage_providers.dart';
 import '../providers/clean_providers.dart';
 import '../widgets/destructive_action_dialog.dart';
 
@@ -238,6 +239,7 @@ class _CleanupCategoryScreenState extends ConsumerState<CleanupCategoryScreen> {
     });
 
     ref.invalidate(cleanupOpportunitiesProvider);
+    ref.invalidate(deviceStorageStatsProvider);
     ref.invalidate(storageOverviewProvider);
     ref.read(trashItemsProvider.notifier).refresh();
 

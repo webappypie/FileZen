@@ -14,16 +14,30 @@ import '../../domain/models/file_entity.dart';
 import '../../domain/models/file_operation_models.dart';
 import '../../domain/models/storage_location.dart';
 import '../../domain/repositories/i_storage_repository.dart';
+import 'device_storage_service.dart';
 
 /// Concrete implementation of IStorageRepository using the Dart I/O filesystem.
 class FilesystemStorageRepository implements IStorageRepository {
+  FilesystemStorageRepository({IDeviceStorageService? deviceStorage})
+      : _deviceStorage = deviceStorage ?? DeviceStorageService();
+
+  final IDeviceStorageService _deviceStorage;
+
+  /// Locations to browse. Byte totals are the OS-measured values of the volume
+  /// a location lives on (0 when they cannot be measured). "Downloads" is a
+  /// folder on the same volume as "Internal Storage": its totals are the
+  /// volume's, so callers must never add locations together.
   @override
   Future<List<StorageLocation>> getStorageLocations() async {
     final locations = <StorageLocation>[];
 
     if (Platform.isAndroid) {
+      final stats = await _deviceStorage.getStats();
+      final total = stats?.totalBytes ?? 0;
+      final free = stats?.freeBytes ?? 0;
+
       // Primary shared storage
-      final primaryPath = '/storage/emulated/0';
+      const primaryPath = '/storage/emulated/0';
       final primaryDir = Directory(primaryPath);
       if (await primaryDir.exists()) {
         locations.add(
@@ -31,29 +45,29 @@ class FilesystemStorageRepository implements IStorageRepository {
             id: 'internal',
             name: 'Internal Storage',
             path: primaryPath,
-            totalBytes: 128 * 1024 * 1024 * 1024, // Fallback nominal, refined via native in Phase 13
-            freeBytes: 64 * 1024 * 1024 * 1024,
+            totalBytes: total,
+            freeBytes: free,
             isRemovable: false,
           ),
         );
       }
 
-      // Downloads directory
-      final downloadsPath = '$primaryPath/Download';
+      // Downloads directory (same volume)
+      const downloadsPath = '$primaryPath/Download';
       if (await Directory(downloadsPath).exists()) {
         locations.add(
           StorageLocation(
             id: 'downloads',
             name: 'Downloads',
             path: downloadsPath,
-            totalBytes: 128 * 1024 * 1024 * 1024,
-            freeBytes: 64 * 1024 * 1024 * 1024,
+            totalBytes: total,
+            freeBytes: free,
             isRemovable: false,
           ),
         );
       }
     } else {
-      // Fallback for desktop testing / dev environments
+      // Desktop / test hosts: no volume measurement is available.
       try {
         final appDocsDir = await getApplicationDocumentsDirectory();
         locations.add(
@@ -61,8 +75,8 @@ class FilesystemStorageRepository implements IStorageRepository {
             id: 'documents',
             name: 'App Documents',
             path: appDocsDir.path,
-            totalBytes: 500 * 1024 * 1024 * 1024,
-            freeBytes: 250 * 1024 * 1024 * 1024,
+            totalBytes: 0,
+            freeBytes: 0,
           ),
         );
       } catch (_) {
@@ -71,27 +85,26 @@ class FilesystemStorageRepository implements IStorageRepository {
             id: 'temp',
             name: 'System Temp Storage',
             path: Directory.systemTemp.path,
-            totalBytes: 128 * 1024 * 1024 * 1024,
-            freeBytes: 64 * 1024 * 1024 * 1024,
+            totalBytes: 0,
+            freeBytes: 0,
           ),
         );
       }
-
-      try {
-        final tempDir = await getTemporaryDirectory();
-        locations.add(
-          StorageLocation(
-            id: 'temp_dir',
-            name: 'Temporary Storage',
-            path: tempDir.path,
-            totalBytes: 500 * 1024 * 1024 * 1024,
-            freeBytes: 250 * 1024 * 1024 * 1024,
-          ),
-        );
-      } catch (_) {}
     }
 
     return locations;
+  }
+
+  /// Roots for a full-device walk: locations nested inside another location
+  /// (Downloads inside Internal Storage) are dropped so nothing is scanned twice.
+  static List<String> distinctRoots(Iterable<String> paths) {
+    final normalized = paths.map(p.normalize).toSet().toList()..sort((a, b) => a.length.compareTo(b.length));
+    final roots = <String>[];
+    for (final path in normalized) {
+      final nested = roots.any((r) => path == r || p.isWithin(r, path));
+      if (!nested) roots.add(path);
+    }
+    return roots;
   }
 
   @override

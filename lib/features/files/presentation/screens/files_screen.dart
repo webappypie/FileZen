@@ -316,7 +316,9 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                               ),
                               const SizedBox(height: AppSpacing.xxs),
                               Text(
-                                '${Formatters.formatFileSize(loc.freeBytes)} free',
+                                loc.totalBytes > 0
+                                    ? '${Formatters.formatFileSize(loc.freeBytes)} free'
+                                    : 'Tap to browse',
                                 style: AppTypography.bodySmall.copyWith(fontSize: 11),
                               ),
                             ],

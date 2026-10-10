@@ -155,7 +155,7 @@ void main() {
 
     // Verify Storage Overview Card
     expect(find.text('Internal Storage Usage'), findsOneWidget);
-    expect(find.text('35.9%'), findsOneWidget);
+    expect(find.text('36%'), findsOneWidget);
     expect(find.text('Deep Analysis →'), findsOneWidget);
 
     // Verify Hub Navigation Row

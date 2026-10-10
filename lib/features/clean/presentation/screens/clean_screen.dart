@@ -9,6 +9,7 @@ import '../../../../core/widgets/error_view.dart';
 import '../../../../core/widgets/loading_view.dart';
 import '../../../../domain/models/cleanup_models.dart';
 import '../../../../domain/models/storage_intelligence_models.dart';
+import '../../../files/presentation/providers/storage_providers.dart';
 import '../providers/clean_providers.dart';
 import 'cleanup_category_screen.dart';
 import 'duplicate_review_screen.dart';
@@ -37,6 +38,7 @@ class CleanScreen extends ConsumerWidget {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () async {
+          ref.invalidate(deviceStorageStatsProvider);
           ref.invalidate(storageOverviewProvider);
           ref.invalidate(cleanupOpportunitiesProvider);
           ref.invalidate(exactDuplicatesProvider);
@@ -59,7 +61,7 @@ class CleanScreen extends ConsumerWidget {
               ),
               error: (e, _) => ErrorView(
                 message: 'Failed to load storage overview: $e',
-                onRetry: () => ref.invalidate(storageOverviewProvider),
+                onRetry: () => ref.invalidate(deviceStorageStatsProvider),
               ),
               data: (overview) => _buildStorageOverviewCard(context, overview, isDark),
             ),
@@ -205,11 +207,14 @@ class CleanScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: AppSpacing.xxs),
                     Text(
-                      '${Formatters.formatFileSize(overview.usedBytes)} used of ${Formatters.formatFileSize(overview.totalBytes)}',
+                      overview.hasDeviceTotals
+                          ? '${Formatters.formatFileSize(overview.usedBytes)} used of ${Formatters.formatFileSize(overview.totalBytes)}'
+                          : 'Device storage unavailable',
                       style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
+                if (overview.hasDeviceTotals)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -217,7 +222,7 @@ class CleanScreen extends ConsumerWidget {
                     borderRadius: AppSpacing.roundedSm,
                   ),
                   child: Text(
-                    '${overview.usedPercentage.toStringAsFixed(1)}%',
+                    '${overview.usedPercentLabel}%',
                     style: AppTypography.labelLarge.copyWith(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w700,
@@ -241,7 +246,9 @@ class CleanScreen extends ConsumerWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '${Formatters.formatFileSize(overview.freeBytes)} available space',
+                  overview.hasDeviceTotals
+                      ? '${Formatters.formatFileSize(overview.freeBytes)} free'
+                      : '${Formatters.formatFileSize(overview.indexedBytes)} in indexed files',
                   style: AppTypography.bodySmall.copyWith(
                     color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                   ),

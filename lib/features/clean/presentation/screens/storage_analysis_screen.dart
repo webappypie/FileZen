@@ -9,6 +9,7 @@ import '../../../../core/widgets/error_view.dart';
 import '../../../../core/widgets/loading_view.dart';
 import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/storage_intelligence_models.dart';
+import '../../../files/presentation/providers/storage_providers.dart';
 import '../providers/clean_providers.dart';
 
 /// Screen presenting deep-dive storage intelligence, category breakdown,
@@ -34,6 +35,7 @@ class StorageAnalysisScreen extends ConsumerWidget {
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh Storage Metrics',
             onPressed: () {
+              ref.invalidate(deviceStorageStatsProvider);
               ref.invalidate(storageOverviewProvider);
               ref.invalidate(topFoldersProvider);
               ref.invalidate(largestFilesProvider);
@@ -43,10 +45,10 @@ class StorageAnalysisScreen extends ConsumerWidget {
         ],
       ),
       body: overviewAsync.when(
-        loading: () => const LoadingView(message: 'Analyzing internal storage structures...'),
+        loading: () => const LoadingView(message: 'Measuring storage...'),
         error: (err, _) => ErrorView(
           message: 'Unable to load storage overview: $err',
-          onRetry: () => ref.invalidate(storageOverviewProvider),
+          onRetry: () => ref.invalidate(deviceStorageStatsProvider),
         ),
         data: (overview) {
           return ListView(
@@ -98,115 +100,131 @@ class StorageAnalysisScreen extends ConsumerWidget {
     );
   }
 
+  /// Device usage (the shared OS measurement, identical to the Home card) and,
+  /// separately, the total of indexed files. The bar shows indexed categories,
+  /// then "System, apps & not indexed" (device used minus indexed), then free.
   Widget _buildMainStorageCard(BuildContext context, StorageOverview overview, bool isDark) {
+    final secondary = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+    final hasTotals = overview.hasDeviceTotals && overview.totalBytes > 0;
+
     return Card(
       child: Padding(
         padding: AppSpacing.cardPadding,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Internal Storage',
-                      style: AppTypography.bodySmall.copyWith(
-                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      Formatters.formatFileSize(overview.usedBytes),
-                      style: AppTypography.headlineMedium.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    Text(
-                      'used of ${Formatters.formatFileSize(overview.totalBytes)}',
-                      style: AppTypography.bodySmall,
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.12),
-                    borderRadius: AppSpacing.roundedMd,
-                  ),
+                Expanded(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${overview.usedPercentage.toStringAsFixed(1)}%',
-                        style: AppTypography.titleLarge.copyWith(
+                        'Internal Storage',
+                        style: AppTypography.bodySmall.copyWith(color: secondary),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        hasTotals ? Formatters.formatFileSize(overview.usedBytes) : 'Unavailable',
+                        style: AppTypography.headlineMedium.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.primary,
                         ),
                       ),
                       Text(
-                        'Occupied',
-                        style: AppTypography.labelSmall.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        hasTotals
+                            ? 'used of ${Formatters.formatFileSize(overview.totalBytes)}'
+                            : 'Device capacity could not be measured',
+                        style: AppTypography.bodySmall,
                       ),
                     ],
                   ),
                 ),
+                if (hasTotals)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: AppSpacing.roundedMd,
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '${overview.usedPercentLabel}%',
+                          style: AppTypography.titleLarge.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        Text(
+                          'Used',
+                          style: AppTypography.labelSmall.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
-            const SizedBox(height: AppSpacing.md),
-
-            // Segmented Progress Bar
-            ClipRRect(
-              borderRadius: AppSpacing.roundedSm,
-              child: SizedBox(
-                height: 12,
-                child: Row(
-                  children: [
-                    ...FileCategory.values.map((cat) {
-                      final size = overview.sizeForCategory(cat);
-                      if (size <= 0) return const SizedBox.shrink();
-                      final ratio = (size / overview.totalBytes).clamp(0.01, 1.0);
-                      return Expanded(
-                        flex: (ratio * 1000).toInt(),
-                        child: Container(color: cat.color),
-                      );
-                    }),
-                    // Free space segment
-                    Expanded(
-                      flex: ((overview.freeBytes / overview.totalBytes).clamp(0.01, 1.0) * 1000).toInt(),
-                      child: Container(color: isDark ? Colors.grey[800] : Colors.grey[300]),
-                    ),
-                  ],
+            if (hasTotals) ...[
+              const SizedBox(height: AppSpacing.md),
+              _buildSegmentedBar(overview, isDark),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            if (hasTotals)
+              Text(
+                '${Formatters.formatFileSize(overview.freeBytes)} free',
+                style: AppTypography.labelLarge.copyWith(
+                  color: AppColors.success,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              'Indexed files: ${Formatters.formatFileSize(overview.indexedBytes)} '
+              '(${overview.indexedFileCount} files)',
+              style: AppTypography.bodySmall.copyWith(color: secondary),
             ),
-            const SizedBox(height: AppSpacing.sm),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '${Formatters.formatFileSize(overview.freeBytes)} Available Free',
-                  style: AppTypography.labelLarge.copyWith(
-                    color: AppColors.success,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  '100% On-Device Safe',
-                  style: AppTypography.labelSmall.copyWith(
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                  ),
-                ),
-              ],
-            ),
+            if (hasTotals)
+              Text(
+                'System, apps & not indexed: ${Formatters.formatFileSize(overview.unindexedUsedBytes)}',
+                style: AppTypography.bodySmall.copyWith(color: secondary),
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildSegmentedBar(StorageOverview overview, bool isDark) {
+    final total = overview.totalBytes;
+    int flexOf(int bytes) => bytes <= 0 ? 0 : ((bytes / total) * 1000).ceil();
+
+    final segments = <Widget>[
+      for (final cat in FileCategory.values)
+        if (flexOf(overview.sizeForCategory(cat)) > 0)
+          Expanded(
+            flex: flexOf(overview.sizeForCategory(cat)),
+            child: Container(color: cat.color),
+          ),
+      if (flexOf(overview.unindexedUsedBytes) > 0)
+        Expanded(
+          flex: flexOf(overview.unindexedUsedBytes),
+          child: Container(color: isDark ? Colors.grey[600] : Colors.grey[500]),
+        ),
+      if (flexOf(overview.freeBytes) > 0)
+        Expanded(
+          flex: flexOf(overview.freeBytes),
+          child: Container(color: isDark ? Colors.grey[800] : Colors.grey[300]),
+        ),
+    ];
+
+    return ClipRRect(
+      borderRadius: AppSpacing.roundedSm,
+      child: SizedBox(height: 12, child: Row(children: segments)),
     );
   }
 
@@ -218,8 +236,10 @@ class StorageAnalysisScreen extends ConsumerWidget {
           children: FileCategory.values.map((cat) {
             final size = overview.sizeForCategory(cat);
             final count = overview.countForCategory(cat);
-            final percentage = overview.usedBytes > 0
-                ? (size / overview.usedBytes * 100.0).toStringAsFixed(1)
+            // Share of the indexed total (not of device usage).
+            final indexed = overview.indexedBytes;
+            final percentage = indexed > 0
+                ? (size / indexed * 100.0).toStringAsFixed(1)
                 : '0.0';
 
             return Padding(
@@ -244,7 +264,7 @@ class StorageAnalysisScreen extends ConsumerWidget {
                           style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w600),
                         ),
                         Text(
-                          '$count files • $percentage%',
+                          '$count files • $percentage% of indexed',
                           style: AppTypography.labelSmall.copyWith(
                             color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                             fontSize: 10,
@@ -275,7 +295,14 @@ class StorageAnalysisScreen extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Text('Trends unavailable: $e'),
       data: (points) {
-        if (points.isEmpty) return const SizedBox.shrink();
+        if (points.length < 2) {
+          return Text(
+            'History builds up from real measurements (one every 12 hours while you use FileZen).',
+            style: AppTypography.bodySmall.copyWith(
+              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            ),
+          );
+        }
 
         return Card(
           child: Padding(
@@ -287,7 +314,7 @@ class StorageAnalysisScreen extends ConsumerWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Last 30 Days Growth',
+                      'Recent Usage',
                       style: AppTypography.labelLarge.copyWith(fontWeight: FontWeight.w600),
                     ),
                     Container(
@@ -357,7 +384,7 @@ class StorageAnalysisScreen extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Text('Unable to load folders: $e'),
       data: (folders) {
-        if (folders.isEmpty) return const Text('No folder data available');
+        if (folders.isEmpty) return const Text('No indexed files yet');
 
         return Card(
           child: Column(
@@ -401,7 +428,7 @@ class StorageAnalysisScreen extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Text('Unable to load largest files: $e'),
       data: (files) {
-        if (files.isEmpty) return const Text('No large files recorded');
+        if (files.isEmpty) return const Text('No indexed files yet');
 
         return Card(
           child: Column(

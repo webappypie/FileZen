@@ -13,15 +13,24 @@ import javax.crypto.BadPaddingException
 
 class MainActivity : FlutterFragmentActivity() {
     private val cryptoExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var deviceChannel: DeviceChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VAULT_CHANNEL)
             .setMethodCallHandler { call, result -> handleVaultCall(call, result) }
+
+        val device = DeviceChannel(applicationContext)
+        deviceChannel = device
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DeviceChannel.CHANNEL)
+            .setMethodCallHandler { call, result ->
+                device.handle(call, result) { runnable -> runOnUiThread(runnable) }
+            }
     }
 
     override fun onDestroy() {
         cryptoExecutor.shutdown()
+        deviceChannel?.shutdown()
         super.onDestroy()
     }
 

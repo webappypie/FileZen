@@ -1,12 +1,48 @@
 import 'file_category.dart';
 
+/// Real capacity of the shared-storage volume, measured by the OS (Android `StatFs`).
+///
+/// This is the only source for "device storage used/free". It is a different
+/// metric from the total size of files FileZen has indexed (see
+/// [StorageOverview.indexedBytes]); the two must never be mixed in one ratio.
+class DeviceStorageStats {
+  final int totalBytes;
+  final int freeBytes;
+  final DateTime measuredAt;
+
+  const DeviceStorageStats({
+    required this.totalBytes,
+    required this.freeBytes,
+    required this.measuredAt,
+  });
+
+  int get usedBytes => totalBytes > freeBytes ? totalBytes - freeBytes : 0;
+
+  /// Used share of the volume, 0.0–1.0.
+  double get usedRatio => usedRatioOf(usedBytes, totalBytes);
+
+  /// The one rounding rule every screen uses for the "% used" label.
+  int get usedPercentLabel => percentLabel(usedRatio);
+
+  static double usedRatioOf(int used, int total) =>
+      total > 0 ? (used / total).clamp(0.0, 1.0) : 0.0;
+
+  /// Whole-number percentage, rounded half up (35.9% -> 36%).
+  static int percentLabel(double ratio) => (ratio * 100).round().clamp(0, 100);
+}
+
 /// Aggregated breakdown of device storage and category occupancy.
+///
+/// [totalBytes], [usedBytes] and [freeBytes] describe the device volume and are
+/// 0 when the device could not be measured ([hasDeviceTotals] is false).
+/// [categorySizes] / [categoryCounts] describe indexed files only.
 class StorageOverview {
   final int totalBytes;
   final int usedBytes;
   final int freeBytes;
   final Map<FileCategory, int> categorySizes;
   final Map<FileCategory, int> categoryCounts;
+  final bool hasDeviceTotals;
 
   const StorageOverview({
     required this.totalBytes,
@@ -14,13 +50,28 @@ class StorageOverview {
     required this.freeBytes,
     required this.categorySizes,
     required this.categoryCounts,
+    this.hasDeviceTotals = true,
   });
 
   /// Ratio of used bytes to total bytes (0.0 to 1.0).
-  double get usedRatio => totalBytes > 0 ? (usedBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
+  double get usedRatio => DeviceStorageStats.usedRatioOf(usedBytes, totalBytes);
 
   /// Percentage of used bytes (0 to 100).
   double get usedPercentage => usedRatio * 100.0;
+
+  /// Same rounding as the Home card ([DeviceStorageStats.percentLabel]).
+  int get usedPercentLabel => DeviceStorageStats.percentLabel(usedRatio);
+
+  /// Total size of all indexed files (sum of the category sizes).
+  int get indexedBytes => categorySizes.values.fold(0, (sum, v) => sum + v);
+
+  /// Number of indexed files.
+  int get indexedFileCount => categoryCounts.values.fold(0, (sum, v) => sum + v);
+
+  /// Device usage not explained by indexed files: system, apps, app data,
+  /// hidden/`Android/` folders and anything not indexed yet.
+  int get unindexedUsedBytes =>
+      usedBytes > indexedBytes ? usedBytes - indexedBytes : 0;
 
   /// Returns size in bytes for a specific category.
   int sizeForCategory(FileCategory category) => categorySizes[category] ?? 0;

@@ -11,6 +11,7 @@ import '../../../../core/widgets/loading_view.dart';
 import '../../../../domain/models/cleanup_models.dart';
 import '../../../../domain/models/deduplication_models.dart';
 import '../../../../domain/models/file_entity.dart';
+import '../../../files/presentation/providers/storage_providers.dart';
 import '../providers/clean_providers.dart';
 import '../widgets/destructive_action_dialog.dart';
 
@@ -408,6 +409,7 @@ class _DuplicateReviewScreenState extends ConsumerState<DuplicateReviewScreen> {
     });
     ref.invalidate(exactDuplicatesProvider);
     ref.invalidate(cleanupOpportunitiesProvider);
+    ref.invalidate(deviceStorageStatsProvider);
     ref.invalidate(storageOverviewProvider);
     ref.read(trashItemsProvider.notifier).refresh();
 

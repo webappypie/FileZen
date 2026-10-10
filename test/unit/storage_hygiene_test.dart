@@ -8,9 +8,12 @@ import 'package:filezen/data/cleanup/storage_hygiene_service.dart';
 import 'package:filezen/data/cleanup/timeline_service.dart';
 import 'package:filezen/data/cleanup/trash_recovery_service.dart';
 import 'package:filezen/data/database/app_database.dart';
+import 'package:filezen/data/indexing/indexing_service.dart';
+import 'package:filezen/data/indexing/text_extractor.dart';
 import 'package:filezen/data/storage/filesystem_storage_repository.dart';
 import 'package:filezen/domain/models/cleanup_models.dart';
 import 'package:filezen/domain/models/file_category.dart';
+import 'package:filezen/domain/models/storage_intelligence_models.dart';
 import 'package:filezen/domain/models/timeline_models.dart';
 
 void main() {
@@ -269,37 +272,92 @@ void main() {
   });
 
   group('StorageHygieneService (Storage Intelligence & Trends)', () {
-    test('computes storage overview across categories', () async {
-      File(p.join(tempDir.path, 'photo.jpg')).writeAsStringSync('image bytes');
-      File(p.join(tempDir.path, 'manual.pdf')).writeAsStringSync('doc bytes');
+    Future<void> indexTemp() async {
+      final indexer = IndexingService(
+        db: db,
+        storageRepo: storageRepo,
+        textExtractor: const TextExtractor(ocrService: null),
+      );
+      final res = await indexer.runIndexScan(targetPaths: [tempDir.path]);
+      expect(res.isSuccess, isTrue);
+    }
 
-      final overview = await hygieneService.getStorageOverview(targetPaths: [tempDir.path]);
-      expect(overview.totalBytes, greaterThan(0));
-      expect(overview.sizeForCategory(FileCategory.image), greaterThan(0));
-      expect(overview.sizeForCategory(FileCategory.document), greaterThan(0));
-      expect(overview.usedRatio, greaterThanOrEqualTo(0.0));
+    test('category totals come from the index; device totals only from the measurement', () async {
+      File(p.join(tempDir.path, 'photo.jpg')).writeAsStringSync('image bytes'); // 11 B
+      File(p.join(tempDir.path, 'manual.pdf')).writeAsStringSync('doc bytes'); // 9 B
+      await indexTemp();
+
+      final unmeasured = await hygieneService.getStorageOverview();
+      expect(unmeasured.hasDeviceTotals, isFalse);
+      expect(unmeasured.totalBytes, 0, reason: 'no nominal capacity may be invented');
+      expect(unmeasured.sizeForCategory(FileCategory.image), 11);
+      expect(unmeasured.sizeForCategory(FileCategory.document), 9);
+      expect(unmeasured.indexedBytes, 20);
+      expect(unmeasured.indexedFileCount, 2);
+
+      final stats = DeviceStorageStats(
+        totalBytes: 1000,
+        freeBytes: 400,
+        measuredAt: DateTime.now(),
+      );
+      final measured = await hygieneService.getStorageOverview(deviceStats: stats);
+      expect(measured.hasDeviceTotals, isTrue);
+      expect(measured.totalBytes, 1000);
+      expect(measured.usedBytes, 600);
+      expect(measured.freeBytes, 400);
+      expect(measured.unindexedUsedBytes, 580);
     });
 
-    test('computes top folders and largest files', () async {
+    test('computes top folders and largest files from the index', () async {
       final sub = Directory(p.join(tempDir.path, 'SubFolder'))..createSync();
       File(p.join(sub.path, 'huge.dat')).writeAsBytesSync(List.filled(2048, 1));
+      File(p.join(tempDir.path, 'small.txt')).writeAsStringSync('x');
+      await indexTemp();
 
-      final topFolders = await hygieneService.getTopFolders(targetPaths: [tempDir.path]);
-      expect(topFolders.isNotEmpty, isTrue);
-      expect(topFolders.first.sizeBytes, greaterThanOrEqualTo(2048));
+      final topFolders = await hygieneService.getTopFolders();
+      expect(topFolders.first.path, sub.path);
+      expect(topFolders.first.name, 'SubFolder');
+      expect(topFolders.first.sizeBytes, 2048);
+      expect(topFolders.first.fileCount, 1);
 
-      final largest = await hygieneService.getLargestFiles(targetPaths: [tempDir.path], minSizeBytes: 1000);
-      expect(largest.isNotEmpty, isTrue);
+      final largest = await hygieneService.getLargestFiles(minSizeBytes: 1000);
+      expect(largest.length, 1);
       expect(largest.first.name, 'huge.dat');
     });
 
-    test('loads storage trends and records new snapshot point', () async {
-      final trendsBefore = await hygieneService.getStorageTrends();
-      expect(trendsBefore.isNotEmpty, isTrue);
+    test('trend history starts empty and records real, spaced device snapshots', () async {
+      expect(await hygieneService.getStorageTrends(), isEmpty,
+          reason: 'no fabricated baseline points');
 
-      await hygieneService.recordCurrentStorageSnapshot(targetPaths: [tempDir.path]);
-      final trendsAfter = await hygieneService.getStorageTrends();
-      expect(trendsAfter.length, greaterThanOrEqualTo(trendsBefore.length));
+      // Without a measurement nothing is recorded.
+      await hygieneService.recordCurrentStorageSnapshot();
+      expect(await hygieneService.getStorageTrends(), isEmpty);
+
+      final t0 = DateTime(2026, 1, 1, 8);
+      await hygieneService.recordCurrentStorageSnapshot(
+        deviceStats: DeviceStorageStats(totalBytes: 1000, freeBytes: 500, measuredAt: t0),
+      );
+      // Within the interval: skipped.
+      await hygieneService.recordCurrentStorageSnapshot(
+        deviceStats: DeviceStorageStats(
+          totalBytes: 1000,
+          freeBytes: 450,
+          measuredAt: t0.add(const Duration(hours: 1)),
+        ),
+      );
+      await hygieneService.recordCurrentStorageSnapshot(
+        deviceStats: DeviceStorageStats(
+          totalBytes: 1000,
+          freeBytes: 400,
+          measuredAt: t0.add(const Duration(hours: 13)),
+        ),
+      );
+
+      final trends = await hygieneService.getStorageTrends();
+      expect(trends.length, 2);
+      expect(trends.first.usedBytes, 500);
+      expect(trends.last.usedBytes, 600);
+      expect(trends.last.changeDeltaBytes, 100);
     });
   });
 

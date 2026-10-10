@@ -3,8 +3,12 @@ import '../models/storage_intelligence_models.dart';
 
 /// Contract for calculating storage breakdown, folder treemaps, largest items, and usage trends.
 abstract class IStorageHygieneService {
-  /// Computes device storage overview across file categories.
-  Future<StorageOverview> getStorageOverview({List<String>? targetPaths});
+  /// Combines the measured device totals ([deviceStats], null when unknown)
+  /// with the per-category totals of indexed files.
+  Future<StorageOverview> getStorageOverview({
+    List<String>? targetPaths,
+    DeviceStorageStats? deviceStats,
+  });
 
   /// Returns top directories consuming the most storage space.
   Future<List<FolderStorageItem>> getTopFolders({
@@ -23,5 +27,8 @@ abstract class IStorageHygieneService {
   Future<List<StorageTrendPoint>> getStorageTrends();
 
   /// Captures and persists the current storage snapshot to the local trend history.
-  Future<void> recordCurrentStorageSnapshot({List<String>? targetPaths});
+  Future<void> recordCurrentStorageSnapshot({
+    List<String>? targetPaths,
+    DeviceStorageStats? deviceStats,
+  });
 }
