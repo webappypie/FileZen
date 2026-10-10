@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,6 +13,7 @@ import '../../../../domain/models/file_sort_criteria.dart';
 import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../providers/category_files_providers.dart';
 import '../resolvers/file_viewer_resolver.dart';
+import '../services/file_deletion.dart';
 
 /// Generic category result screen displaying indexed files for a given category.
 /// Operates directly on SQLite indexed metadata with zero unnecessary filesystem scanning.
@@ -48,8 +48,23 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
     super.dispose();
   }
 
+  // Memo: selection taps rebuild the screen; re-sorting a large category on
+  // every tap made scrolling and selection janky.
+  List<FileEntity>? _memoSource;
+  Object? _memoKey;
+  List<FileEntity> _memoResult = const [];
+
   List<FileEntity> _applySortingAndFiltering(List<FileEntity> source) {
-    var filtered = source;
+    final key = (_sortField, _sortAscending, _searchFilter);
+    if (identical(source, _memoSource) && key == _memoKey) return _memoResult;
+    _memoSource = source;
+    _memoKey = key;
+    return _memoResult = _sortAndFilter(source);
+  }
+
+  List<FileEntity> _sortAndFilter(List<FileEntity> source) {
+    // Copy: never reorder the provider's cached list in place.
+    var filtered = List<FileEntity>.of(source);
     if (_searchFilter.isNotEmpty) {
       final q = _searchFilter.toLowerCase();
       filtered = filtered.where((f) => f.name.toLowerCase().contains(q)).toList();
@@ -451,7 +466,10 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Delete ${files.length} file(s)?'),
-        content: const Text('This action will delete the selected files from storage.'),
+        content: Text(
+          'This permanently deletes ${Formatters.formatFileSize(files.fold<int>(0, (a, f) => a + f.size))} '
+          'from storage. It cannot be undone.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(
@@ -464,19 +482,13 @@ class _CategoryFilesScreenState extends ConsumerState<CategoryFilesScreen> {
     );
 
     if (confirmed == true) {
-      for (final f in files) {
-        try {
-          final file = File(f.path);
-          if (await file.exists()) await file.delete();
-        } catch (_) {}
-      }
+      // Deleted files also leave the index, so they do not reappear here.
+      final result = await FileDeletion.deleteFiles(ref, files);
+      if (!mounted) return;
       setState(() => _selectedPaths.clear());
-      final query = (category: widget.category, isDownloads: widget.isDownloads);
-      ref.invalidate(categoryFilesListProvider(query));
-      ref.invalidate(categoryFileCountsProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Deleted ${files.length} item(s)')),
+          SnackBar(content: Text(result.summary())),
         );
       }
     }

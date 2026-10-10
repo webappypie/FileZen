@@ -25,6 +25,7 @@ import '../../../transfer/presentation/screens/network_hub_screen.dart';
 import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../../../../core/widgets/file_thumbnail_widget.dart';
 import '../resolvers/file_viewer_resolver.dart';
+import '../services/file_deletion.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
 
@@ -957,26 +958,12 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () async {
               Navigator.pop(ctx);
-              final repo = ref.read(storageRepositoryProvider);
-              final indexService = ref.read(indexingServiceProvider);
               final parentDir = p.dirname(files.first.path);
-
-              final res = await repo.batchDelete(files.map((f) => f.path).toList());
-              res.when(
-                success: (_) async {
-                  ref.read(selectedFilePathsProvider.notifier).clear();
-                  ref.invalidate(directoryContentsProvider(parentDir));
-                  for (final f in files) {
-                    await indexService.removeFileByPath(f.path);
-                  }
-                  if (!context.mounted) return;
-                  _showSnackBar(context, 'Deleted ${files.length} items');
-                },
-                failure: (e) {
-                  if (!context.mounted) return;
-                  _showSnackBar(context, 'Deletion failed: ${e.message}');
-                },
-              );
+              final result = await FileDeletion.deleteFiles(ref, files);
+              ref.read(selectedFilePathsProvider.notifier).clear();
+              ref.invalidate(directoryContentsProvider(parentDir));
+              if (!context.mounted) return;
+              _showSnackBar(context, result.summary());
             },
             child: const Text('Delete'),
           ),
@@ -1005,15 +992,12 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () async {
               Navigator.pop(ctx);
-              final repo = ref.read(storageRepositoryProvider);
-              final res = await repo.delete(file.path);
-              res.when(
-                success: (_) {
-                  ref.invalidate(directoryContentsProvider(p.dirname(file.path)));
-                  ref.read(indexingServiceProvider).removeFileByPath(file.path);
-                  _showSnackBar(context, 'Deleted "${file.name}"');
-                },
-                failure: (e) => _showSnackBar(context, 'Delete failed: ${e.message}'),
+              final result = await FileDeletion.deleteFiles(ref, [file]);
+              ref.invalidate(directoryContentsProvider(p.dirname(file.path)));
+              if (!context.mounted) return;
+              _showSnackBar(
+                context,
+                result.allDeleted ? 'Deleted "${file.name}"' : 'Could not delete "${file.name}"',
               );
             },
             child: const Text('Delete'),

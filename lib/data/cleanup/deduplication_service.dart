@@ -12,6 +12,8 @@ import '../../domain/repositories/i_deduplication_service.dart';
 import '../../domain/repositories/i_storage_repository.dart';
 import '../../domain/repositories/i_trash_recovery_service.dart';
 import '../database/app_database.dart';
+import '../storage/file_walker.dart';
+import '../storage/filesystem_storage_repository.dart';
 
 /// Implementation of IDeduplicationService providing 3-tier duplicate detection,
 /// similar-media heuristics, cleanup candidate generators, and safe execution.
@@ -47,37 +49,11 @@ class DeduplicationService implements IDeduplicationService {
           .toList();
     }
 
-    // Direct scan fallback if database is empty/in-memory
-    final locations = await storageRepo.getStorageLocations();
-    final roots = targetPaths ?? locations.map((l) => l.path).toList();
-    final collected = <FileEntity>[];
-
-    for (final root in roots) {
-      final dir = Directory(root);
-      if (await dir.exists()) {
-        try {
-          for (final entity in dir.listSync(recursive: true, followLinks: false)) {
-            if (entity is File) {
-              try {
-                final stat = entity.statSync();
-                collected.add(FileEntity(
-                  id: entity.path,
-                  path: entity.path,
-                  name: p.basename(entity.path),
-                  extension: p.extension(entity.path),
-                  size: stat.size,
-                  modifiedAt: stat.modified,
-                  createdAt: stat.changed,
-                  isDirectory: false,
-                  category: FileCategory.fromExtension(p.extension(entity.path)),
-                ));
-              } catch (_) {}
-            }
-          }
-        } catch (_) {}
-      }
-    }
-    return collected;
+    // Index empty: walk explicitly requested roots only. Without roots the
+    // automatic index supplies the data shortly; walking all shared storage
+    // here duplicated the indexer's work.
+    if (targetPaths == null) return const [];
+    return FileWalker.files(targetPaths);
   }
 
   @override
@@ -306,36 +282,8 @@ class DeduplicationService implements IDeduplicationService {
   @override
   Future<List<String>> scanEmptyFolders({List<String>? scanPaths}) async {
     final locations = await storageRepo.getStorageLocations();
-    final roots = scanPaths ?? locations.map((l) => l.path).toList();
-    final emptyFolders = <String>[];
-
-    for (final root in roots) {
-      final dir = Directory(root);
-      if (await dir.exists()) {
-        _collectEmptyFolders(dir, emptyFolders);
-      }
-    }
-    return emptyFolders;
-  }
-
-  void _collectEmptyFolders(Directory dir, List<String> result) {
-    try {
-      final entries = dir.listSync(followLinks: false);
-      if (entries.isEmpty) {
-        // Exclude system root or hidden system folders
-        final name = p.basename(dir.path);
-        if (!name.startsWith('.') && !name.startsWith('Android')) {
-          result.add(dir.path);
-        }
-        return;
-      }
-
-      for (final entry in entries) {
-        if (entry is Directory) {
-          _collectEmptyFolders(entry, result);
-        }
-      }
-    } catch (_) {}
+    final roots = scanPaths ?? FilesystemStorageRepository.distinctRoots(locations.map((l) => l.path));
+    return FileWalker.emptyFolders(roots);
   }
 
   @override

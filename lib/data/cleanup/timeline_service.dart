@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'package:path/path.dart' as p;
 
 import '../../domain/models/file_category.dart';
 import '../../domain/models/file_entity.dart';
@@ -7,6 +5,7 @@ import '../../domain/models/timeline_models.dart';
 import '../../domain/repositories/i_storage_repository.dart';
 import '../../domain/repositories/i_timeline_service.dart';
 import '../database/app_database.dart';
+import '../storage/file_walker.dart';
 
 /// Implementation of ITimelineService aggregating local files into temporal buckets.
 class TimelineService implements ITimelineService {
@@ -183,35 +182,8 @@ class TimelineService implements ITimelineService {
           .toList();
     }
 
-    final locations = await storageRepo.getStorageLocations();
-    final roots = targetPaths ?? locations.map((l) => l.path).toList();
-    final collected = <FileEntity>[];
-
-    for (final root in roots) {
-      final dir = Directory(root);
-      if (await dir.exists()) {
-        try {
-          for (final entity in dir.listSync(recursive: true, followLinks: false)) {
-            if (entity is File) {
-              try {
-                final stat = entity.statSync();
-                collected.add(FileEntity(
-                  id: entity.path,
-                  path: entity.path,
-                  name: p.basename(entity.path),
-                  extension: p.extension(entity.path),
-                  size: stat.size,
-                  modifiedAt: stat.modified,
-                  createdAt: stat.changed,
-                  isDirectory: false,
-                  category: FileCategory.fromExtension(p.extension(entity.path)),
-                ));
-              } catch (_) {}
-            }
-          }
-        } catch (_) {}
-      }
-    }
-    return collected;
+    // Index empty: walk explicitly requested roots only (see DeduplicationService).
+    if (targetPaths == null) return const [];
+    return FileWalker.files(targetPaths);
   }
 }

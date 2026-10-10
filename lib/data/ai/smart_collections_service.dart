@@ -122,6 +122,10 @@ class SmartCollectionsService implements ISmartCollectionsService {
     if (collectionId == 'large_media') {
       return entities.where((e) => e.size >= 50 * 1024 * 1024).toList();
     }
+    // Shown as "Recent Tax Receipts & Invoices": newest first, not by rank.
+    if (collectionId == 'invoices_receipts') {
+      entities.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+    }
 
     return entities;
   }
