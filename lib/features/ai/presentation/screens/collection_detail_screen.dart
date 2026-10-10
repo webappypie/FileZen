@@ -1,19 +1,12 @@
+import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../domain/models/ai_models.dart';
-import '../../../../domain/models/audio_playback_models.dart';
-import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/file_entity.dart';
-import '../../../documents/presentation/screens/document_viewer_screen.dart';
-import '../../../documents/presentation/screens/pdf_viewer_screen.dart';
-import '../../../media/presentation/providers/media_providers.dart';
-import '../../../media/presentation/screens/audio_player_screen.dart';
-import '../../../media/presentation/screens/image_viewer_screen.dart';
-import '../../../media/presentation/screens/video_player_screen.dart';
 import '../providers/ai_providers.dart';
 import '../widgets/related_files_sheet.dart';
 
@@ -26,54 +19,8 @@ class CollectionDetailScreen extends ConsumerWidget {
 
   final SmartCollection collection;
 
-  void _openFile(BuildContext context, WidgetRef ref, FileEntity entity) {
-    final ext = entity.extension.toLowerCase();
-
-    if (ext == '.pdf') {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: entity.path)),
-      );
-      return;
-    }
-
-    switch (entity.category) {
-      case FileCategory.image:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ImageViewerScreen(imagePaths: [entity.path])),
-        );
-        break;
-      case FileCategory.video:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoPaths: [entity.path])),
-        );
-        break;
-      case FileCategory.audio:
-        final audioService = ref.read(audioPlayerServiceProvider);
-        audioService.setQueue(
-          [
-            AudioTrack(
-              id: entity.path,
-              path: entity.path,
-              title: entity.name,
-              artist: p.dirname(entity.path),
-            ),
-          ],
-          autoPlay: true,
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AudioPlayerScreen()),
-        );
-        break;
-      case FileCategory.document:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DocumentViewerScreen(filePath: entity.path)),
-        );
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Opening ${entity.name}')),
-        );
-    }
+  void _openFile(BuildContext context, WidgetRef ref, FileEntity entity, List<FileEntity> all) {
+    FileViewerResolver.openFile(context, ref, entity, all);
   }
 
   void _showRelatedFiles(BuildContext context, FileEntity file) {
@@ -168,15 +115,8 @@ class CollectionDetailScreen extends ConsumerWidget {
                     final file = files[index];
 
                     return ListTile(
-                      onTap: () => _openFile(context, ref, file),
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: file.category.color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(file.category.icon, color: file.category.color, size: 24),
-                      ),
+                      onTap: () => _openFile(context, ref, file, files),
+                      leading: FileThumbnailWidget(file: file, size: 40),
                       title: Text(
                         file.name,
                         style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),

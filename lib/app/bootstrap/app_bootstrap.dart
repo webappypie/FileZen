@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,9 +9,11 @@ import '../navigation/navigation_shell.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_provider.dart';
 import '../../core/logging/app_logger.dart';
+import '../../data/media/thumbnail_provider.dart';
 import '../../data/monitoring/crash_reporter.dart';
 import '../../data/monitoring/performance_monitor.dart';
 import '../../features/monitoring/presentation/providers/monitoring_providers.dart';
+import '../../features/search/presentation/providers/indexing_coordinator.dart';
 import '../../features/vault/presentation/providers/vault_lifecycle_guard.dart';
 
 /// Bootstrap coordinator for FileZen application startup.
@@ -74,6 +78,9 @@ class _FileZenAppState extends ConsumerState<FileZenApp> {
       ref.read(wapCentralManagerProvider).initialize();
       // Starts the app-wide Vault auto-lock observer.
       ref.read(vaultLifecycleGuardProvider);
+      // Keeps the index current (startup, resume, periodic incremental scans).
+      ref.read(indexingCoordinatorProvider);
+      unawaited(ref.read(thumbnailServiceProvider).trimCache());
     });
   }
 

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../data/media/thumbnail_provider.dart';
 import '../../domain/models/file_category.dart';
 import '../../domain/models/file_entity.dart';
 
@@ -48,41 +50,57 @@ class FileThumbnailWidget extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        // Bound the decoded buffer. Only the width is given: with both set Flutter
-        // decodes to that exact size and distorts non-square photos.
-        cacheWidth: 160,
+        gaplessPlayback: true,
+        // Bound the decoded buffer to the on-screen pixel size. Only the width is
+        // given: with both set Flutter decodes to that exact size and distorts
+        // non-square photos.
+        cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(48, 512),
         errorBuilder: (_, __, ___) => _buildFallback(file.category.icon, file.category.color),
       );
     }
 
-    // 2. VIDEO: Representative frame container with video badge
+    // 2. VIDEO: a real frame (generated once, cached on disk), badge on top;
+    // the icon is shown while it loads and for files without a usable frame.
     if (file.category == FileCategory.video) {
-      return _buildContainer(
-        color: AppColors.typeVideo.withValues(alpha: 0.15),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(Icons.movie_rounded, color: AppColors.typeVideo, size: size * 0.5),
-            Positioned(
-              bottom: 2,
-              right: 2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Text(
-                  ext.toUpperCase(),
-                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-          ],
-        ),
+      return _VideoThumbnail(
+        file: file,
+        size: size,
+        badge: ext.toUpperCase(),
+        placeholder: _buildVideoPlaceholder(ext),
       );
     }
 
+    return _buildNonMediaContent(ext);
+  }
+
+  Widget _buildVideoPlaceholder(String ext) {
+    return _buildContainer(
+      color: AppColors.typeVideo.withValues(alpha: 0.15),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(Icons.movie_rounded, color: AppColors.typeVideo, size: size * 0.5),
+          Positioned(
+            bottom: 2,
+            right: 2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                ext.toUpperCase(),
+                style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNonMediaContent(String ext) {
     // 3. AUDIO: Sound waveform representation with audio badge
     if (file.category == FileCategory.audio) {
       return _buildContainer(
@@ -251,6 +269,90 @@ class FileThumbnailWidget extends StatelessWidget {
       child: Center(
         child: Icon(icon, color: color, size: size * 0.55),
       ),
+    );
+  }
+}
+
+class _VideoThumbnail extends ConsumerStatefulWidget {
+  const _VideoThumbnail({
+    required this.file,
+    required this.size,
+    required this.badge,
+    required this.placeholder,
+  });
+
+  final FileEntity file;
+  final double size;
+  final String badge;
+  final Widget placeholder;
+
+  @override
+  ConsumerState<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends ConsumerState<_VideoThumbnail> {
+  Future<File?>? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final a = oldWidget.file;
+    final b = widget.file;
+    if (a.path != b.path || a.size != b.size || a.modifiedAt != b.modifiedAt) _load();
+  }
+
+  void _load() {
+    _thumb = ref.read(thumbnailServiceProvider).videoThumbnail(
+          widget.file,
+          // Rows scrolled off-screen before their turn are skipped.
+          stillNeeded: () => mounted,
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _thumb,
+      builder: (context, snapshot) {
+        final thumb = snapshot.data;
+        if (thumb == null) return widget.placeholder;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              thumb,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              cacheWidth: (widget.size * MediaQuery.devicePixelRatioOf(context)).round().clamp(48, 512),
+              errorBuilder: (_, __, ___) => widget.placeholder,
+            ),
+            const Center(
+              child: Icon(Icons.play_circle_fill_rounded, color: Colors.white70, size: 20),
+            ),
+            Positioned(
+              bottom: 2,
+              right: 2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  widget.badge,
+                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

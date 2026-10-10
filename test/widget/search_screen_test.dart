@@ -115,7 +115,7 @@ void main() {
     expect(find.text('1 file found'), findsOneWidget);
     expect(find.text('budget_2026.pdf'), findsOneWidget);
     expect(find.text('Documents'), findsWidgets);
-    expect(find.byIcon(Icons.info_outline_rounded), findsOneWidget);
+    expect(find.byTooltip('File actions'), findsOneWidget);
   });
 
   testWidgets('SearchScreen renders EmptyView when query yields no results', (tester) async {

@@ -8,17 +8,13 @@ import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/empty_view.dart';
 import '../../../../core/widgets/error_view.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
 import '../../../../core/widgets/loading_view.dart';
 import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/indexing_progress.dart';
 import '../../../../domain/models/search_result_item.dart';
-import 'package:filezen/domain/models/audio_playback_models.dart';
-import 'package:filezen/features/documents/presentation/screens/document_viewer_screen.dart';
-import 'package:filezen/features/documents/presentation/screens/pdf_viewer_screen.dart';
-import 'package:filezen/features/media/presentation/providers/media_providers.dart';
-import 'package:filezen/features/media/presentation/screens/audio_player_screen.dart';
-import 'package:filezen/features/media/presentation/screens/image_viewer_screen.dart';
-import 'package:filezen/features/media/presentation/screens/video_player_screen.dart';
+import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../vault/presentation/services/vault_action_coordinator.dart';
 import '../providers/search_providers.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -141,9 +137,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
-                    progress.status == IndexingStatus.scanning
-                        ? 'Scanning storage for files...'
-                        : 'Indexing (${progress.indexedCount + progress.skippedCount}/${progress.totalFilesDiscovered})...',
+                    switch (progress.status) {
+                      IndexingStatus.scanning => 'Scanning storage for files...',
+                      IndexingStatus.paused => 'Indexing paused',
+                      _ when progress.pendingOcrCount > 0 =>
+                        'Reading text in images (${progress.pendingOcrCount} left)...',
+                      _ =>
+                        'Indexing (${progress.indexedCount + progress.skippedCount}/${progress.totalFilesDiscovered})...',
+                    },
                     style: AppTypography.labelSmall.copyWith(fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -168,7 +169,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
 
     final countText = countAsync.maybeWhen(
-      data: (cnt) => '$cnt files indexed in catalog',
+      data: (cnt) => progress.pendingOcrCount > 0
+          ? '$cnt files indexed • ${progress.pendingOcrCount} images waiting for text recognition'
+          : '$cnt files indexed in catalog',
       orElse: () => 'Database catalog ready',
     );
 
@@ -301,7 +304,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       ),
       child: InkWell(
         borderRadius: AppSpacing.roundedMd,
-        onTap: () => _showFileDetailsDialog(context, result),
+        onTap: () => FileViewerResolver.openFile(
+          context,
+          ref,
+          file,
+          (ref.read(searchResultsProvider).valueOrNull ?? const []).map((r) => r.file).toList(),
+        ),
         child: Padding(
           padding: AppSpacing.cardPadding,
           child: Column(
@@ -310,15 +318,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: file.category.color.withValues(alpha: 0.12),
-                      borderRadius: AppSpacing.roundedSm,
-                    ),
-                    child: Icon(file.category.icon, color: file.category.color, size: 22),
-                  ),
+                  FileThumbnailWidget(file: file, size: 40),
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Column(
@@ -343,10 +343,29 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.info_outline_rounded, size: 20),
-                    tooltip: 'File details',
-                    onPressed: () => _showFileDetailsDialog(context, result),
+                  PopupMenuButton<String>(
+                    tooltip: 'File actions',
+                    icon: const Icon(Icons.more_vert_rounded, size: 20),
+                    onSelected: (action) {
+                      switch (action) {
+                        case 'open':
+                          FileViewerResolver.openFile(context, ref, file);
+                        case 'details':
+                          _showFileDetailsDialog(context, result);
+                        case 'vault':
+                          VaultActionCoordinator.moveFileToVault(
+                            context,
+                            ref,
+                            file,
+                            onSuccess: () => ref.invalidate(searchResultsProvider),
+                          );
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'open', child: Text('Open')),
+                      PopupMenuItem(value: 'details', child: Text('Details')),
+                      PopupMenuItem(value: 'vault', child: Text('Move to Vault')),
+                    ],
                   ),
                 ],
               ),
@@ -517,33 +536,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ],
         ),
         actions: [
-          if (file.category == FileCategory.image ||
-              file.category == FileCategory.video ||
-              file.category == FileCategory.audio ||
-              file.category == FileCategory.document)
-            FilledButton.icon(
-              icon: Icon(
-                file.category == FileCategory.image
-                    ? Icons.visibility_rounded
-                    : (file.category == FileCategory.video || file.category == FileCategory.audio)
-                        ? Icons.play_arrow_rounded
-                        : Icons.description_outlined,
-                size: 18,
-              ),
-              label: Text(
-                file.category == FileCategory.image
-                    ? 'View Image'
-                    : file.category == FileCategory.video
-                        ? 'Play Video'
-                        : file.category == FileCategory.audio
-                            ? 'Play Audio'
-                            : (file.extension.toLowerCase() == '.pdf' ? 'View PDF' : 'View Document'),
-              ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                _openMedia(context, file);
-              },
-            ),
+          FilledButton.icon(
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+            label: const Text('Open'),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              FileViewerResolver.openFile(context, ref, file);
+            },
+          ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Close'),
@@ -551,51 +551,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ],
       ),
     );
-  }
-
-  void _openMedia(BuildContext context, dynamic file) {
-    if (file.category == FileCategory.image) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ImageViewerScreen(
-            imagePaths: [file.path as String],
-            initialIndex: 0,
-          ),
-        ),
-      );
-    } else if (file.category == FileCategory.video) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => VideoPlayerScreen(
-            videoPaths: [file.path as String],
-            initialIndex: 0,
-          ),
-        ),
-      );
-    } else if (file.category == FileCategory.audio) {
-      final player = ref.read(audioPlayerServiceProvider);
-      final track = AudioTrack(id: file.path as String, path: file.path as String, title: file.name as String);
-      player.setQueue([track], initialIndex: 0, autoPlay: true);
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => const AudioPlayerScreen(),
-        ),
-      );
-    } else if (file.category == FileCategory.document) {
-      if (file.extension.toLowerCase() == '.pdf') {
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (context) => PdfViewerScreen(filePath: file.path as String),
-          ),
-        );
-      } else {
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (context) => DocumentViewerScreen(filePath: file.path as String),
-          ),
-        );
-      }
-    }
   }
 
   Widget _buildDetailRow(String label, String value) {

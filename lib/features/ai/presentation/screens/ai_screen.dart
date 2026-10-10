@@ -1,3 +1,5 @@
+import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -5,15 +7,7 @@ import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
-import '../../../../domain/models/audio_playback_models.dart';
-import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/search_result_item.dart';
-import '../../../documents/presentation/screens/document_viewer_screen.dart';
-import '../../../documents/presentation/screens/pdf_viewer_screen.dart';
-import '../../../media/presentation/providers/media_providers.dart';
-import '../../../media/presentation/screens/audio_player_screen.dart';
-import '../../../media/presentation/screens/image_viewer_screen.dart';
-import '../../../media/presentation/screens/video_player_screen.dart';
 import '../providers/ai_providers.dart';
 import 'auto_rename_screen.dart';
 import 'collection_detail_screen.dart';
@@ -56,54 +50,10 @@ class _AiScreenState extends ConsumerState<AiScreen> {
   }
 
   void _openFile(SearchResultItem item) {
-    final entity = item.file;
-    final ext = entity.extension.toLowerCase();
-
-    if (ext == '.pdf') {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: entity.path)),
-      );
-      return;
-    }
-
-    switch (entity.category) {
-      case FileCategory.image:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ImageViewerScreen(imagePaths: [entity.path])),
-        );
-        break;
-      case FileCategory.video:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoPaths: [entity.path])),
-        );
-        break;
-      case FileCategory.audio:
-        final audioService = ref.read(audioPlayerServiceProvider);
-        audioService.setQueue(
-          [
-            AudioTrack(
-              id: entity.path,
-              path: entity.path,
-              title: entity.name,
-              artist: p.dirname(entity.path),
-            ),
-          ],
-          autoPlay: true,
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AudioPlayerScreen()),
-        );
-        break;
-      case FileCategory.document:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DocumentViewerScreen(filePath: entity.path)),
-        );
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Opening ${entity.name}')),
-        );
-    }
+    final siblings = (ref.read(askYourFilesResultsProvider).valueOrNull ?? const <SearchResultItem>[])
+        .map((r) => r.file)
+        .toList();
+    FileViewerResolver.openFile(context, ref, item.file, siblings);
   }
 
   Future<void> _showRenameDialog(SearchResultItem item) async {
@@ -544,14 +494,7 @@ class _AiScreenState extends ConsumerState<AiScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         onTap: () => _openFile(item),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: entity.category.color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(entity.category.icon, color: entity.category.color, size: 24),
-        ),
+        leading: FileThumbnailWidget(file: entity, size: 40),
         title: Text(
           entity.name,
           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),

@@ -1,6 +1,8 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/result/result.dart';
+import '../../../../data/media/thumbnail_provider.dart';
 import '../../../../data/vault/vault_auth_service.dart';
 import '../../../../data/vault/vault_cipher.dart';
 import '../../../../data/vault/vault_share_service.dart';
@@ -123,6 +125,12 @@ class VaultItemsNotifier extends AsyncNotifier<List<VaultItem>> {
         // The original is gone: drop its name, path and extracted/OCR text from the
         // public search index so a vaulted file can never surface in normal Search.
         await ref.read(indexingServiceProvider).removeFileByPath(item.originalPath);
+        // No preview of a vaulted file may survive outside the Vault: drop its
+        // cached video frame and any decoded image of it held in memory.
+        await ref.read(thumbnailServiceProvider).evictPath(item.originalPath);
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
         ref.invalidate(categoryFileCountsProvider);
       }
       await refresh();

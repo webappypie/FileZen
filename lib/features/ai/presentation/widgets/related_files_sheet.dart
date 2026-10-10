@@ -1,17 +1,10 @@
+import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import '../../../../app/theme/app_colors.dart';
 import '../../../../core/utils/formatters.dart';
-import '../../../../domain/models/audio_playback_models.dart';
-import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/file_entity.dart';
-import '../../../documents/presentation/screens/document_viewer_screen.dart';
-import '../../../documents/presentation/screens/pdf_viewer_screen.dart';
-import '../../../media/presentation/providers/media_providers.dart';
-import '../../../media/presentation/screens/audio_player_screen.dart';
-import '../../../media/presentation/screens/image_viewer_screen.dart';
-import '../../../media/presentation/screens/video_player_screen.dart';
 import '../providers/ai_providers.dart';
 
 /// Modal bottom sheet presenting related files and companion assets for a target file.
@@ -24,54 +17,10 @@ class RelatedFilesSheet extends ConsumerWidget {
   final FileEntity targetFile;
 
   void _openFile(BuildContext context, WidgetRef ref, FileEntity entity) {
+    // The navigator's context outlives this sheet, which closes first.
+    final hostContext = Navigator.of(context).context;
     Navigator.of(context).pop();
-    final ext = entity.extension.toLowerCase();
-
-    if (ext == '.pdf') {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: entity.path)),
-      );
-      return;
-    }
-
-    switch (entity.category) {
-      case FileCategory.image:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ImageViewerScreen(imagePaths: [entity.path])),
-        );
-        break;
-      case FileCategory.video:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoPaths: [entity.path])),
-        );
-        break;
-      case FileCategory.audio:
-        final audioService = ref.read(audioPlayerServiceProvider);
-        audioService.setQueue(
-          [
-            AudioTrack(
-              id: entity.path,
-              path: entity.path,
-              title: entity.name,
-              artist: p.dirname(entity.path),
-            ),
-          ],
-          autoPlay: true,
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AudioPlayerScreen()),
-        );
-        break;
-      case FileCategory.document:
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DocumentViewerScreen(filePath: entity.path)),
-        );
-        break;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Opening ${entity.name}')),
-        );
-    }
+    FileViewerResolver.openFile(hostContext, ref, entity);
   }
 
   @override
@@ -146,14 +95,7 @@ class RelatedFilesSheet extends ConsumerWidget {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       onTap: () => _openFile(context, ref, file),
-                      leading: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: file.category.color.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Icon(file.category.icon, color: file.category.color, size: 20),
-                      ),
+                      leading: FileThumbnailWidget(file: file, size: 36),
                       title: Text(
                         file.name,
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13),
