@@ -117,8 +117,30 @@ Biometric unlock before the first PIN unlock cannot migrate (the PIN is the lega
 
 ## 6. Known Limitations / Follow-ups
 
-- **Device-bound by design**: if the device Keystore key is lost (factory reset, restore to a new phone, Keystore corruption) the vault is unrecoverable. The UI should state this during onboarding (not yet added).
+- **Device-bound by design**: if the device Keystore key is lost (factory reset, restore to a new phone, Keystore corruption) the vault is unrecoverable. Since 2026-10-10 the first-time setup (`VaultSetupScreen`) states this and requires the user to acknowledge it before the Vault is created (see §7).
 - **100 MB per item**. Larger files need a chunked/streaming AEAD (for example Tink streaming AEAD) — a product/engineering decision.
 - The Android-specific code (`VaultKeystore.kt`, `MainActivity` channel, biometric + `FLAG_SECURE` behavior) compiles and its pure-crypto core is unit-tested on the JVM,
   but **has not been exercised on a physical device or emulator**. See `docs/04_Development_Roadmap/audit_remediation_status.md` for the manual test checklist.
 - Secure deletion of the original file after import is a normal filesystem delete; per the Security Architecture we make no physical-overwrite claim.
+
+---
+
+## 7. Recovery Behaviour (documented 2026-10-10)
+
+No recovery mechanism exists, and none was added: any escrow or reset path would either weaken
+the encryption (a second key that can open the Vault) or require an owner product decision
+(e.g. an encrypted export the user stores elsewhere). What actually happens:
+
+| Situation | Outcome | Why |
+| :--- | :--- | :--- |
+| **User forgets the PIN** | Vault contents cannot be decrypted by anyone, including FileZen. Biometric unlock (if it was enabled and the key is still valid) still opens the Vault; from there the user can *Move out of Vault* each file. There is no PIN reset. | The master key is only reachable via the PIN-derived KEK or the biometric Keystore copy. |
+| **App uninstalled / app data cleared** | Vault containers (app-private storage) and both Keystore keys are deleted. Contents are gone. | App-private data and app-owned Keystore keys are removed by Android. |
+| **Phone lost or stolen** | Contents stay encrypted. An attacker needs the device unlocked *and* the Vault PIN (5 wrong attempts → 30 s lockouts); an offline copy of app data is useless without the hardware-bound key. FileZen cannot help the user retrieve the files. | Device-bound Keystore wrap + PIN. |
+| **Factory reset** | Contents are gone. | Wipes app data and the Keystore. |
+| **New phone / restore from backup** | Contents do not transfer (`allowBackup=false`, Vault excluded from device-to-device transfer). The user must *Move out of Vault* on the old phone first, transfer the files, and re-add them on the new phone. | The Keystore key never leaves the old device. |
+| **System screen lock or fingerprints changed** | Biometric unlock switches itself off; the PIN still works; nothing is lost. | Only the biometric Keystore copy is invalidated. |
+
+The setup screen shows a condensed version of this table ("There is no recovery") and the user must
+tick "I understand that lost PINs and lost phones cannot be recovered" before the Vault is created.
+Existing vaults and the v1 → v2 migration are unaffected by the setup-flow change.
+

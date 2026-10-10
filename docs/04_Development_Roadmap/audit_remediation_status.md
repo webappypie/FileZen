@@ -129,6 +129,7 @@ scoped/all-files storage behavior, ML Kit OCR output, Play Billing/ads/WAPCentra
 6. **Rotate the leaked WAPCentral X-App-Key** and review the uncommitted `08_Credentials.md`.
 7. **pdfx replacement** (§4.3), and WebDAV "use TLS" option (§4.1).
 8. Dead code from the Gemini sprint: `IndexingService.pause/resume/startPeriodicBackgroundSync` and `IndexingProgressNotifier.pause/resumeIndexing` are never called (no runtime effect); wire them to the documented battery/charging throttling or remove.
+   *Update 2026-10-10:* `IndexingService.pause/resume` are now driven by the app lifecycle (`IndexingCoordinator`) and OCR is deferred on battery saver / low battery / thermal stress. `startPeriodicBackgroundSync` remains unused (the coordinator schedules scans). See `full_audit_2026-10-10.md`.
 
 ---
 
