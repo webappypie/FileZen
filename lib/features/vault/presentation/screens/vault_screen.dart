@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
@@ -8,9 +12,12 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/empty_view.dart';
 import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/vault_models.dart';
+import '../../../files/presentation/providers/category_files_providers.dart';
 import '../../../files/presentation/screens/category_files_screen.dart';
+import '../../../search/presentation/providers/search_providers.dart';
 import '../providers/vault_providers.dart';
 import 'vault_preview_screen.dart';
+import 'vault_setup_screen.dart';
 import 'vault_settings_screen.dart';
 import '../widgets/secure_share_dialog.dart';
 
@@ -107,7 +114,24 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                     );
                   }
 
-                  final isPinConfigured = config.isPinConfigured;
+                  if (!config.isPinConfigured) {
+                    return Column(
+                      children: [
+                        Text(
+                          'Move private photos, documents and recordings here to encrypt them on this phone.',
+                          textAlign: TextAlign.center,
+                          style: AppTypography.bodySmall,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: AppColors.typeVault),
+                          onPressed: () => VaultSetupScreen.show(context),
+                          icon: const Icon(Icons.shield_rounded),
+                          label: const Text('Set Up Vault'),
+                        ),
+                      ],
+                    );
+                  }
 
                   return Column(
                     children: [
@@ -117,35 +141,41 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                           controller: _pinController,
                           obscureText: true,
                           keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          maxLength: 6,
                           textAlign: TextAlign.center,
                           style: const TextStyle(fontSize: 20, letterSpacing: 8),
-                          decoration: InputDecoration(
+                          decoration: const InputDecoration(
                             hintText: '••••',
-                            hintStyle: const TextStyle(letterSpacing: 8),
-                            helperText: isPinConfigured
-                                ? 'Enter 4-6 digit PIN'
-                                : 'Set a new 4-6 digit PIN',
+                            hintStyle: TextStyle(letterSpacing: 8),
+                            helperText: 'Enter your Vault PIN',
+                            counterText: '',
                           ),
-                          onSubmitted: (_) => _handleUnlockOrSetup(isPinConfigured),
+                          onSubmitted: (_) => _unlockWithPin(),
                         ),
                       ),
                       if (_errorMessage != null) ...[
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           _errorMessage!,
+                          textAlign: TextAlign.center,
                           style: const TextStyle(color: AppColors.error, fontSize: 12),
                         ),
                       ],
                       const SizedBox(height: AppSpacing.md),
                       ElevatedButton.icon(
-                        onPressed: () => _handleUnlockOrSetup(isPinConfigured),
-                        icon: const Icon(Icons.fingerprint_rounded, size: 22),
-                        label: Text(
-                          isPinConfigured
-                              ? 'Unlock with Biometrics / PIN'
-                              : 'Create Master PIN',
-                        ),
+                        onPressed: _unlockWithPin,
+                        icon: const Icon(Icons.lock_open_rounded, size: 22),
+                        label: const Text('Unlock Vault'),
                       ),
+                      if (config.isBiometricEnabled) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        TextButton.icon(
+                          onPressed: _unlockWithBiometrics,
+                          icon: const Icon(Icons.fingerprint_rounded),
+                          label: const Text('Use fingerprint / face'),
+                        ),
+                      ],
                     ],
                   );
                 },
@@ -157,40 +187,25 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
     );
   }
 
-  Future<void> _handleUnlockOrSetup(bool isConfigured) async {
+  Future<void> _unlockWithPin() async {
     final pin = _pinController.text.trim();
-
-    if (!isConfigured) {
-      if (pin.length < 4) {
-        setState(() => _errorMessage = 'PIN must be at least 4 digits');
-        return;
-      }
-      final success = await ref.read(vaultSessionProvider.notifier).setupInitialPin(pin);
-      if (success) {
-        _pinController.clear();
-        setState(() => _errorMessage = null);
-      }
-    } else {
-      if (pin.isEmpty) {
-        // Attempt biometric unlock if PIN text is empty
-        final res = await ref.read(vaultSessionProvider.notifier).unlockWithBiometrics();
-        if (!res.success) {
-          setState(() => _errorMessage = res.errorMessage ?? 'Authentication failed');
-        } else {
-          _pinController.clear();
-          setState(() => _errorMessage = null);
-        }
-        return;
-      }
-
-      final res = await ref.read(vaultSessionProvider.notifier).unlockWithPin(pin);
-      if (!res.success) {
-        setState(() => _errorMessage = res.errorMessage);
-      } else {
-        _pinController.clear();
-        setState(() => _errorMessage = null);
-      }
+    if (pin.isEmpty) {
+      setState(() => _errorMessage = 'Enter your PIN');
+      return;
     }
+    final res = await ref.read(vaultSessionProvider.notifier).unlockWithPin(pin);
+    if (!mounted) return;
+    _pinController.clear();
+    // A wrong PIN may have started a lockout; reload it.
+    ref.invalidate(vaultSecurityConfigProvider);
+    setState(() => _errorMessage = res.success ? null : res.errorMessage);
+  }
+
+  Future<void> _unlockWithBiometrics() async {
+    final res = await ref.read(vaultSessionProvider.notifier).unlockWithBiometrics();
+    if (!mounted) return;
+    ref.invalidate(vaultSecurityConfigProvider);
+    setState(() => _errorMessage = res.success ? null : (res.errorMessage ?? 'Authentication failed'));
   }
 
   Widget _buildUnlockedView(BuildContext context, bool isDark) {
@@ -314,9 +329,9 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                             value: 'export',
                             child: Row(
                               children: [
-                                Icon(Icons.file_upload_outlined, size: 18),
+                                Icon(Icons.lock_open_rounded, size: 18),
                                 SizedBox(width: 8),
-                                Text('Export to Storage'),
+                                Text('Move out of Vault'),
                               ],
                             ),
                           ),
@@ -375,14 +390,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
         MaterialPageRoute(builder: (_) => VaultPreviewScreen(item: item)),
       );
     } else if (action == 'export') {
-      final destDir = '/storage/emulated/0/Download';
-      final res = await ref.read(vaultItemsProvider.notifier).exportFile(item, destDir);
-      if (!context.mounted) return;
-      if (res.isSuccess) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Restored ${item.originalFileName} to $destDir')),
-        );
-      }
+      await _moveOutOfVault(context, item);
     } else if (action == 'share') {
       final confirmed = await SecureShareDialog.show(context, item);
       if (confirmed && context.mounted) {
@@ -412,6 +420,50 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
           );
         }
       }
+    }
+  }
+
+  /// Decrypts [item] back to its original folder (Downloads if that folder no
+  /// longer exists) and removes it from the Vault once the copy is verified.
+  Future<void> _moveOutOfVault(BuildContext context, VaultItem item) async {
+    final originalDir = p.dirname(item.originalPath);
+    final destDir = (item.originalPath.isNotEmpty && await Directory(originalDir).exists())
+        ? originalDir
+        : '/storage/emulated/0/Download';
+    if (!context.mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move out of Vault?'),
+        content: Text(
+          '"${item.originalFileName}" will be decrypted to $destDir and removed from the Vault. '
+          'It will be visible to other apps and in FileZen search again.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Move out')),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final res = await ref.read(vaultItemsProvider.notifier).exportFile(item, destDir);
+    if (!context.mounted) return;
+    final restored = res.dataOrNull;
+    if (restored != null) {
+      await ref.read(indexingServiceProvider).indexSingleFile(restored);
+      ref.invalidate(categoryFileCountsProvider);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Restored to ${restored.path}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.error,
+        content: Text('Could not move "${item.originalFileName}" out of the Vault: '
+            '${res.errorOrNull?.message ?? 'unknown error'}. It is still in the Vault.'),
+      ));
     }
   }
 

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/app_colors.dart';
@@ -6,6 +9,7 @@ import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../domain/models/file_entity.dart';
 import '../providers/vault_providers.dart';
+import '../screens/vault_setup_screen.dart';
 
 /// Coordinator for moving files into Vault from any screen in FileZen
 /// (files browser, categories, search, details, recent collections).
@@ -112,20 +116,48 @@ class VaultActionCoordinator {
 
     if (confirm != true || !context.mounted) return;
 
-    // 4. Execute move with rollback safety
+    // 4. Execute the move. Each file is encrypted, the encrypted copy is
+    // verified, and only then is the original deleted (see VaultStorageService).
     int succeeded = 0;
     final errors = <String>[];
+    final progress = ValueNotifier<int>(0);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: ValueListenableBuilder<int>(
+            valueListenable: progress,
+            builder: (_, done, __) => Row(
+              children: [
+                const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 3)),
+                const SizedBox(width: 16),
+                Expanded(child: Text('Encrypting ${done + 1 > count ? count : done + 1} of $count…')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
 
-    for (final file in files) {
-      final result = await ref.read(vaultItemsProvider.notifier).importFile(
-            file.path,
-            deleteSource: true,
-          );
-      if (result.isSuccess) {
-        succeeded++;
-      } else {
-        errors.add('${file.name}: ${result.errorOrNull?.message}');
+    try {
+      for (final file in files) {
+        final result = await ref.read(vaultItemsProvider.notifier).importFile(
+              file.path,
+              deleteSource: true,
+            );
+        if (result.isSuccess) {
+          succeeded++;
+        } else {
+          errors.add('${file.name}: ${result.errorOrNull?.message}');
+        }
+        progress.value++;
       }
+    } finally {
+      navigator.pop();
+      progress.dispose();
     }
 
     if (!context.mounted) return;
@@ -150,114 +182,16 @@ class VaultActionCoordinator {
     }
   }
 
-  static Future<bool> _showOnboardingSetup(BuildContext context, WidgetRef ref) async {
-    final pinController = TextEditingController();
-    final confirmController = TextEditingController();
-    bool enableBiometrics = true;
-    String? errorText;
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          icon: const Icon(Icons.lock_outline_rounded, color: AppColors.typeVault, size: 40),
-          title: const Text('Setup FileZen Vault'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Create a Master PIN to protect your private documents and media with AES-256 encryption.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: pinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: InputDecoration(
-                    labelText: 'Create 4-6 Digit PIN',
-                    prefixIcon: const Icon(Icons.pin_rounded),
-                    errorText: errorText,
-                  ),
-                ),
-                TextField(
-                  controller: confirmController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirm PIN',
-                    prefixIcon: Icon(Icons.lock_outline_rounded),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Enable Biometrics / Device Lock', style: TextStyle(fontSize: 13)),
-                  subtitle: const Text('Unlock with fingerprint or face', style: TextStyle(fontSize: 11)),
-                  value: enableBiometrics,
-                  onChanged: (val) => setDialogState(() => enableBiometrics = val),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.typeVault),
-              onPressed: () async {
-                final pin = pinController.text.trim();
-                final confirm = confirmController.text.trim();
-
-                if (pin.length < 4) {
-                  setDialogState(() => errorText = 'PIN must be at least 4 digits');
-                  return;
-                }
-                if (pin != confirm) {
-                  setDialogState(() => errorText = 'PINs do not match');
-                  return;
-                }
-
-                final success = await ref.read(vaultSessionProvider.notifier).setupInitialPin(pin);
-                if (success) {
-                  final biometricOk = enableBiometrics
-                      ? await ref.read(vaultAuthServiceProvider).setBiometricEnabled(true)
-                      : true;
-                  if (!biometricOk && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Biometric unlock could not be enabled; use your PIN. '
-                          'You can retry in Vault settings.',
-                        ),
-                      ),
-                    );
-                  }
-                  if (ctx.mounted) Navigator.of(ctx).pop(true);
-                } else {
-                  setDialogState(() => errorText = 'Failed to setup PIN');
-                }
-              },
-              child: const Text('Complete Setup'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    return result ?? false;
-  }
+  /// The same first-time setup the Vault tab uses; returns true when created.
+  static Future<bool> _showOnboardingSetup(BuildContext context, WidgetRef ref) =>
+      VaultSetupScreen.show(context);
 
   static Future<bool> _showUnlockPrompt(BuildContext context, WidgetRef ref) async {
     final pinController = TextEditingController();
     String? errorText;
+    final biometricEnabled =
+        (await ref.read(vaultAuthServiceProvider).getSecurityConfig()).isBiometricEnabled;
+    if (!context.mounted) return false;
 
     final result = await showDialog<bool>(
       context: context,
@@ -268,12 +202,14 @@ class VaultActionCoordinator {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Enter your Vault Master PIN to proceed.', style: TextStyle(fontSize: 13)),
+              const Text('Enter your Vault PIN to continue.', style: TextStyle(fontSize: 13)),
               const SizedBox(height: 16),
               TextField(
                 controller: pinController,
                 obscureText: true,
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                maxLength: 6,
                 autofocus: true,
                 decoration: InputDecoration(
                   labelText: 'Master PIN',
@@ -289,19 +225,21 @@ class VaultActionCoordinator {
                   }
                 },
               ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                icon: const Icon(Icons.fingerprint_rounded),
-                label: const Text('Unlock with Biometrics'),
-                onPressed: () async {
-                  final bioRes = await ref.read(vaultSessionProvider.notifier).unlockWithBiometrics();
-                  if (bioRes.success) {
-                    if (ctx.mounted) Navigator.of(ctx).pop(true);
-                  } else {
-                    setDialogState(() => errorText = bioRes.errorMessage ?? 'Biometric authentication failed');
-                  }
-                },
-              ),
+              if (biometricEnabled) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  icon: const Icon(Icons.fingerprint_rounded),
+                  label: const Text('Use fingerprint / face'),
+                  onPressed: () async {
+                    final bioRes = await ref.read(vaultSessionProvider.notifier).unlockWithBiometrics();
+                    if (bioRes.success) {
+                      if (ctx.mounted) Navigator.of(ctx).pop(true);
+                    } else {
+                      setDialogState(() => errorText = bioRes.errorMessage ?? 'Biometric authentication failed');
+                    }
+                  },
+                ),
+              ],
             ],
           ),
           actions: [

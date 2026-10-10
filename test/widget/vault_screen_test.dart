@@ -16,7 +16,10 @@ import 'package:filezen/features/vault/presentation/providers/vault_providers.da
 import 'package:filezen/features/vault/presentation/screens/vault_preview_screen.dart';
 import 'package:filezen/features/vault/presentation/screens/vault_screen.dart';
 import 'package:filezen/features/vault/presentation/screens/vault_settings_screen.dart';
+import 'package:filezen/features/vault/presentation/screens/vault_setup_screen.dart';
 import 'package:filezen/features/vault/presentation/widgets/secure_share_dialog.dart';
+
+import '../support/vault_test_doubles.dart';
 
 class _FakeVaultStorageService implements IVaultStorageService {
   final List<VaultItem> items;
@@ -102,6 +105,11 @@ class _MockVaultItemsNotifier extends VaultItemsNotifier {
   Future<List<VaultItem>> build() async => _mockItems;
 }
 
+VaultAuthService _authWithBiometrics(bool available) => VaultAuthService(
+      backend: FakeVaultCryptoBackend(),
+      biometricGate: FakeBiometricGate()..available = available,
+    );
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -128,8 +136,8 @@ void main() {
   }
 
   group('VaultScreen Widget Tests', () {
-    testWidgets('renders PIN setup prompt when vault is unconfigured', (tester) async {
-      final unconfiguredConfig = const VaultSecurityConfig(isPinConfigured: false);
+    testWidgets('unconfigured vault offers one setup flow, not a PIN field', (tester) async {
+      const unconfiguredConfig = VaultSecurityConfig(isPinConfigured: false);
 
       await tester.pumpWidget(
         buildTestableWidget(
@@ -137,62 +145,96 @@ void main() {
           overrides: [
             vaultSecurityConfigProvider.overrideWith((ref) => Future.value(unconfiguredConfig)),
             vaultSessionProvider.overrideWith((ref) => _MockSessionNotifier(false)),
+            vaultAuthServiceProvider.overrideWithValue(_authWithBiometrics(false)),
           ],
         ),
       );
       await tester.pumpAndSettle();
 
       expect(find.text('Vault is Locked'), findsOneWidget);
-      expect(find.text('Create Master PIN'), findsOneWidget);
-      expect(find.text('Set a new 4-6 digit PIN'), findsOneWidget);
-      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+
+      await tester.tap(find.text('Set Up Vault'));
+      await tester.pumpAndSettle();
+      expect(find.byType(VaultSetupScreen), findsOneWidget);
+      expect(find.text('There is no recovery'), findsOneWidget);
     });
 
-    testWidgets('shows validation error when setting PIN shorter than 4 digits', (tester) async {
-      final unconfiguredConfig = const VaultSecurityConfig(isPinConfigured: false);
-
+    testWidgets('setup validates PIN, confirmation and the recovery acknowledgement', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final session = _MockSessionNotifier(false);
       await tester.pumpWidget(
         buildTestableWidget(
-          const VaultScreen(),
+          const VaultSetupScreen(),
           overrides: [
-            vaultSecurityConfigProvider.overrideWith((ref) => Future.value(unconfiguredConfig)),
-            vaultSessionProvider.overrideWith((ref) => _MockSessionNotifier(false)),
+            vaultSessionProvider.overrideWith((ref) => session),
+            vaultAuthServiceProvider.overrideWithValue(_authWithBiometrics(false)),
           ],
         ),
       );
       await tester.pumpAndSettle();
+      final pin = find.widgetWithText(TextField, 'Create a 4–6 digit PIN');
+      final confirm = find.widgetWithText(TextField, 'Confirm PIN');
+      final create = find.text('Create Vault');
 
-      await tester.enterText(find.byType(TextField), '12');
-      await tester.tap(find.text('Create Master PIN'));
+      await tester.enterText(pin, '12');
+      await tester.ensureVisible(create);
+      await tester.tap(create);
       await tester.pumpAndSettle();
+      expect(find.text('Use 4 to 6 digits.'), findsOneWidget);
 
-      expect(find.text('PIN must be at least 4 digits'), findsOneWidget);
+      await tester.enterText(pin, '1234');
+      await tester.enterText(confirm, '4321');
+      await tester.ensureVisible(create);
+      await tester.tap(create);
+      await tester.pumpAndSettle();
+      expect(find.text('The PINs do not match.'), findsOneWidget);
+
+      await tester.enterText(confirm, '1234');
+      await tester.ensureVisible(create);
+      await tester.tap(create);
+      await tester.pumpAndSettle();
+      expect(find.text('Please confirm you understand how recovery works.'), findsOneWidget);
+      expect(session.state, isFalse);
+
+      // Biometrics are not offered on a device without them.
+      expect(find.byType(SwitchListTile), findsNothing);
+
+      await tester.ensureVisible(find.byType(CheckboxListTile));
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.ensureVisible(create);
+      await tester.tap(create);
+      await tester.pumpAndSettle();
+      expect(session.state, isTrue, reason: 'vault created and unlocked');
     });
 
-    testWidgets('renders locked screen and unlock options when PIN is configured', (tester) async {
-      final configuredConfig = const VaultSecurityConfig(
-        isPinConfigured: true,
-        isBiometricEnabled: true,
-      );
+    testWidgets('biometric unlock is offered only when it is enabled', (tester) async {
+      for (final enabled in [true, false]) {
+        await tester.pumpWidget(const SizedBox()); // fresh ProviderScope per case
+        await tester.pumpWidget(
+          buildTestableWidget(
+            const VaultScreen(),
+            overrides: [
+              vaultSecurityConfigProvider.overrideWith(
+                (ref) => Future.value(VaultSecurityConfig(isPinConfigured: true, isBiometricEnabled: enabled)),
+              ),
+              vaultSessionProvider.overrideWith((ref) => _MockSessionNotifier(false)),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
 
-      await tester.pumpWidget(
-        buildTestableWidget(
-          const VaultScreen(),
-          overrides: [
-            vaultSecurityConfigProvider.overrideWith((ref) => Future.value(configuredConfig)),
-            vaultSessionProvider.overrideWith((ref) => _MockSessionNotifier(false)),
-          ],
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Vault is Locked'), findsOneWidget);
-      expect(find.text('Unlock with Biometrics / PIN'), findsOneWidget);
-      expect(find.text('Enter 4-6 digit PIN'), findsOneWidget);
+        expect(find.text('Vault is Locked'), findsOneWidget);
+        expect(find.text('Unlock Vault'), findsOneWidget);
+        expect(find.text('Enter your Vault PIN'), findsOneWidget);
+        expect(find.text('Use fingerprint / face'), enabled ? findsOneWidget : findsNothing);
+      }
     });
 
     testWidgets('shows error on incorrect PIN entry and unlocks on correct PIN', (tester) async {
-      final configuredConfig = const VaultSecurityConfig(
+      const configuredConfig = VaultSecurityConfig(
         isPinConfigured: true,
         isBiometricEnabled: false,
       );
@@ -210,16 +252,22 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // An empty PIN never triggers anything else (e.g. a biometric prompt).
+      await tester.tap(find.text('Unlock Vault'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter your PIN'), findsOneWidget);
+      expect(sessionNotifier.state, isFalse);
+
       // Enter wrong PIN
       await tester.enterText(find.byType(TextField), '9999');
-      await tester.tap(find.text('Unlock with Biometrics / PIN'));
+      await tester.tap(find.text('Unlock Vault'));
       await tester.pumpAndSettle();
 
       expect(find.text('Incorrect master PIN'), findsOneWidget);
 
       // Enter correct PIN
       await tester.enterText(find.byType(TextField), '1234');
-      await tester.tap(find.text('Unlock with Biometrics / PIN'));
+      await tester.tap(find.text('Unlock Vault'));
       await tester.pumpAndSettle();
 
       // Vault dashboard should now be rendered

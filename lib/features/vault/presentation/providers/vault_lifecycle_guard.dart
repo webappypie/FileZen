@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,12 +15,16 @@ import 'vault_providers.dart';
 class VaultLifecycleGuard with WidgetsBindingObserver {
   final Ref _ref;
   DateTime? _backgroundedAt;
+  Timer? _backgroundLock;
 
   VaultLifecycleGuard(this._ref) {
     WidgetsBinding.instance.addObserver(this);
   }
 
-  void dispose() => WidgetsBinding.instance.removeObserver(this);
+  void dispose() {
+    _backgroundLock?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -35,7 +41,14 @@ class VaultLifecycleGuard with WidgetsBindingObserver {
     _backgroundedAt = DateTime.now();
     try {
       final timeout = (await auth.getSecurityConfig()).autoLockTimeout;
-      if (timeout == Duration.zero) _lock();
+      if (timeout == Duration.zero) {
+        _lock();
+      } else {
+        // Do not keep the key in memory past the timeout while the app sits in
+        // the background (the resume check alone only ran on return).
+        _backgroundLock?.cancel();
+        _backgroundLock = Timer(timeout, _lock);
+      }
     } catch (e) {
       // If the policy cannot be read, fail closed.
       AppLogger.warning('Auto-lock policy unreadable; locking vault', 'VaultAuto');
@@ -44,6 +57,8 @@ class VaultLifecycleGuard with WidgetsBindingObserver {
   }
 
   Future<void> _onResumed() async {
+    _backgroundLock?.cancel();
+    _backgroundLock = null;
     final since = _backgroundedAt;
     _backgroundedAt = null;
     final auth = _ref.read(vaultAuthServiceProvider);

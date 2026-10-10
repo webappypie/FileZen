@@ -194,5 +194,24 @@ void main() {
       expect(container.read(vaultSessionProvider), isFalse);
       expect(auth.isUnlocked, isFalse);
     });
+
+    testWidgets('locks while still in the background once the timeout elapses', (tester) async {
+      await tester.runAsync(() async {
+        await unlock();
+        final cfg = await auth.getSecurityConfig();
+        await auth.updateSecurityConfig(cfg.copyWith(autoLockTimeout: const Duration(seconds: 1)));
+      });
+
+      await tester.runAsync(() async {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      expect(auth.isUnlocked, isTrue, reason: 'within the timeout');
+
+      // No resume: the key must not stay in memory past the timeout.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1200)));
+      expect(container.read(vaultSessionProvider), isFalse);
+      expect(auth.activeSessionKey, isNull);
+    });
   });
 }
