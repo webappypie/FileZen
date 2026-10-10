@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:flutter/painting.dart' show Rect;
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path/path.dart' as p;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +17,30 @@ import 'package:filezen/data/storage/filesystem_storage_repository.dart';
 import 'package:filezen/domain/models/ai_models.dart';
 import 'package:filezen/domain/models/file_category.dart';
 import 'package:filezen/domain/models/file_entity.dart';
+
+class _FakeRecognizer extends TextRecognizer {
+  final RecognizedText? _result;
+  final bool _fail;
+  final List<String?> processedPaths = [];
+
+  _FakeRecognizer(RecognizedText result)
+      : _result = result,
+        _fail = false;
+
+  _FakeRecognizer.failing()
+      : _result = null,
+        _fail = true;
+
+  @override
+  Future<RecognizedText> processImage(InputImage inputImage) async {
+    processedPaths.add(inputImage.filePath);
+    if (_fail) throw StateError('ML Kit failure');
+    return _result!;
+  }
+
+  @override
+  Future<void> close() async {}
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -60,30 +86,71 @@ void main() {
     }
   });
 
-  group('OcrService (On-Device Text & Keyword Extraction)', () {
-    test('isOcrAvailable returns true offline', () async {
-      expect(await ocrService.isOcrAvailable(), isTrue);
+  group('OcrService (on-device ML Kit; never guesses from file bytes)', () {
+    TextLine line(String text, double? confidence, [List<String> langs = const ['en']]) => TextLine(
+          text: text,
+          elements: const [],
+          boundingBox: Rect.zero,
+          recognizedLanguages: langs,
+          cornerPoints: const [],
+          confidence: confidence,
+          angle: null,
+        );
+
+    test('uses the injected recognizer result: text, lines, mean confidence, language', () async {
+      final imgFile = File('${tempDir.path}/scan.png')..writeAsBytesSync([1, 2, 3, 4]);
+      final recognizer = _FakeRecognizer(RecognizedText(
+        text: 'INVOICE 10928\nTotal 42.50',
+        blocks: [
+          TextBlock(
+            text: 'INVOICE 10928\nTotal 42.50',
+            lines: [line('INVOICE 10928', 0.9), line('Total 42.50', 0.7)],
+            boundingBox: Rect.zero,
+            recognizedLanguages: const ['en'],
+            cornerPoints: const [],
+          ),
+        ],
+      ));
+
+      final result = await OcrService(recognizer: recognizer).extractTextFromImage(imgFile.path);
+
+      expect(recognizer.processedPaths, [imgFile.path]);
+      expect(result.extractedText, contains('INVOICE 10928'));
+      expect(result.lines, ['INVOICE 10928', 'Total 42.50']);
+      expect(result.confidence, closeTo(0.8, 1e-9));
+      expect(result.detectedLanguage, 'en');
+      expect(result.hasText, isTrue);
     });
 
-    test('extracts ASCII text and detects receipt tokens', () async {
-      final imgFile = File('${tempDir.path}/test_receipt.png');
-      // Write sample payload containing ASCII receipt tokens
-      final content = 'INVOICE 10928 Store Receipt Total \$42.50 Paid verification code 9921';
-      await imgFile.writeAsString(content);
+    test('does NOT read text out of file bytes or names when ML Kit is unavailable', () async {
+      // Host build: no ML Kit and no injected recognizer.
+      final imgFile = File('${tempDir.path}/invoice_receipt.png');
+      await imgFile.writeAsString('INVOICE 10928 Store Receipt Total 42.50 verification code 9921');
 
-      final result = await ocrService.extractTextFromImage(imgFile.path);
-      expect(result.extractedText.toLowerCase(), contains('receipt'));
-      expect(result.extractedText.toLowerCase(), contains('invoice'));
-      expect(result.confidence, greaterThan(0.0));
+      const service = OcrService();
+      expect(await service.isOcrAvailable(), isFalse);
+      final result = await service.extractTextFromImage(imgFile.path);
+      expect(result.extractedText, isEmpty);
+      expect(result.hasText, isFalse);
+      expect(result.confidence, 0.0);
     });
 
-    test('handles empty or binary files gracefully', () async {
-      final emptyFile = File('${tempDir.path}/empty.jpg');
-      await emptyFile.writeAsBytes([]);
-
-      final result = await ocrService.extractTextFromImage(emptyFile.path);
+    test('recognizer failures degrade to an empty result', () async {
+      final imgFile = File('${tempDir.path}/x.png')..writeAsBytesSync([1]);
+      final result = await OcrService(recognizer: _FakeRecognizer.failing())
+          .extractTextFromImage(imgFile.path);
       expect(result.extractedText, isEmpty);
       expect(result.confidence, 0.0);
+    });
+
+    test('handles missing and empty files gracefully', () async {
+      final emptyFile = File('${tempDir.path}/empty.jpg')..writeAsBytesSync([]);
+      final recognizer = _FakeRecognizer(RecognizedText(text: 'never used', blocks: const []));
+      final service = OcrService(recognizer: recognizer);
+
+      expect((await service.extractTextFromImage(emptyFile.path)).extractedText, isEmpty);
+      expect((await service.extractTextFromImage('${tempDir.path}/missing.png')).extractedText, isEmpty);
+      expect(recognizer.processedPaths, isEmpty);
     });
   });
 

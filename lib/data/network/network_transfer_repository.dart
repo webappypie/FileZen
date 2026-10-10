@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -11,6 +12,7 @@ import '../../domain/models/network_models.dart';
 import '../../domain/models/notification_models.dart';
 import '../../domain/repositories/i_network_transfer_repository.dart';
 import '../../domain/repositories/i_notification_repository.dart';
+import '../vault/vault_crypto_backend.dart';
 import 'lan_web_server.dart';
 import 'protocol_adapters/ftp_adapter.dart';
 import 'protocol_adapters/protocol_adapter.dart';
@@ -23,6 +25,11 @@ class NetworkTransferRepository implements INetworkTransferRepository {
   final String? customStoragePath;
   final INotificationRepository? notificationRepository;
   final LanWebServer _lanWebServer;
+
+  /// Wraps saved server passwords with the hardware-backed Android Keystore key
+  /// so they are never written to disk in the clear. Null only on non-Android
+  /// hosts (desktop test runs), where there is no Keystore.
+  final VaultCryptoBackend? _secretBackend;
 
   final Map<NetworkProtocol, ProtocolAdapter> _adapters;
 
@@ -43,9 +50,13 @@ class NetworkTransferRepository implements INetworkTransferRepository {
     this.notificationRepository,
     LanWebServer? lanWebServer,
     Map<NetworkProtocol, ProtocolAdapter>? adapters,
+    VaultCryptoBackend? secretBackend,
   })  : _lanWebServer = lanWebServer ?? LanWebServer(),
+        _secretBackend = secretBackend ??
+            (Platform.isAndroid ? const MethodChannelVaultCryptoBackend() : null),
         _adapters = adapters ??
             {
+              // Only WebDAV has a real wire implementation; the rest fail honestly.
               NetworkProtocol.webdav: const WebDavProtocolAdapter(),
               NetworkProtocol.ftp: const FtpProtocolAdapter(),
               NetworkProtocol.smb: const SmbProtocolAdapter(),
@@ -83,60 +94,84 @@ class NetworkTransferRepository implements INetworkTransferRepository {
         final content = await file.readAsString();
         if (content.trim().isNotEmpty) {
           final list = jsonDecode(content) as List<dynamic>;
-          _cachedServers = list
-              .map((item) =>
-                  NetworkServerConfig.fromJson(item as Map<String, dynamic>))
-              .toList();
+          final loaded = <NetworkServerConfig>[];
+          var hasPlaintextPassword = false;
+          for (final item in list) {
+            final json = item as Map<String, dynamic>;
+            // Earlier builds seeded placeholder "starter" servers that pointed
+            // at made-up LAN addresses; they were never user-configured.
+            if ((json['id'] as String? ?? '').startsWith('starter_')) continue;
+            if ((json['password'] as String? ?? '').isNotEmpty) hasPlaintextPassword = true;
+            loaded.add(await _decodeServer(json));
+          }
+          _cachedServers = loaded;
+          // Re-save so any legacy plaintext password is replaced by a wrapped one.
+          if (hasPlaintextPassword && _secretBackend != null) {
+            await _persistServers();
+          }
         } else {
           _cachedServers = [];
         }
       } else {
-        _cachedServers = _getStarterServers();
-        await _persistServers();
+        _cachedServers = [];
       }
     } catch (e) {
       AppLogger.warning(
-          'NetworkTransferRepository', 'Failed to load servers, fallback to starters: $e');
-      _cachedServers = _getStarterServers();
+          'NetworkTransferRepository', 'Failed to load servers: $e');
+      _cachedServers = [];
     }
 
     _initialized = true;
     _serversController.add(List.unmodifiable(_cachedServers!));
   }
 
-  List<NetworkServerConfig> _getStarterServers() {
-    return [
-      const NetworkServerConfig(
-        id: 'starter_local_webdav',
-        name: 'Local WebDAV Server',
-        protocol: NetworkProtocol.webdav,
-        host: '192.168.1.100',
-        port: 8080,
-        path: '/webdav',
-        username: 'admin',
-        isAnonymous: false,
-      ),
-      const NetworkServerConfig(
-        id: 'starter_nas_smb',
-        name: 'Home NAS (SMB)',
-        protocol: NetworkProtocol.smb,
-        host: '192.168.1.10',
-        port: 445,
-        path: 'Public',
-        isAnonymous: true,
-      ),
-    ];
-  }
-
   Future<void> _persistServers() async {
     if (_cachedServers == null) return;
     try {
       final file = await _getStorageFile();
-      final jsonStr =
-          jsonEncode(_cachedServers!.map((s) => s.toJson()).toList());
-      await file.writeAsString(jsonStr, flush: true);
+      final encoded = <Map<String, dynamic>>[];
+      for (final server in _cachedServers!) {
+        encoded.add(await _encodeServer(server));
+      }
+      await file.writeAsString(jsonEncode(encoded), flush: true);
     } catch (e) {
       AppLogger.error('NetworkTransferRepository', 'Failed to save servers: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> _encodeServer(NetworkServerConfig server) async {
+    final json = server.toJson();
+    if (server.password.isEmpty || _secretBackend == null) return json;
+    try {
+      final wrapped = await _secretBackend.keystoreWrap(
+        VaultKeySlot.device,
+        Uint8List.fromList(utf8.encode(server.password)),
+      );
+      json['password'] = '';
+      json['passwordEnc'] = base64Encode(wrapped);
+    } catch (e) {
+      // Never fall back to writing the password in the clear.
+      AppLogger.error('NetworkTransferRepository',
+          'Could not protect a saved server password; it will not be stored: ${e.runtimeType}');
+      json['password'] = '';
+    }
+    return json;
+  }
+
+  Future<NetworkServerConfig> _decodeServer(Map<String, dynamic> json) async {
+    final server = NetworkServerConfig.fromJson(json);
+    final enc = json['passwordEnc'] as String?;
+    if (enc == null || enc.isEmpty || _secretBackend == null) return server;
+    try {
+      final plain = await _secretBackend.keystoreUnwrap(
+        VaultKeySlot.device,
+        Uint8List.fromList(base64Decode(enc)),
+      );
+      return server.copyWith(password: utf8.decode(plain));
+    } catch (e) {
+      AppLogger.warning('NetworkTransferRepository',
+          'Saved server password could not be unlocked; re-enter it: ${e.runtimeType}');
+      return server;
     }
   }
 
@@ -274,7 +309,7 @@ class NetworkTransferRepository implements INetworkTransferRepository {
         await notificationRepository?.addNotification(AppNotification(
           id: 'lan_started_${DateTime.now().millisecondsSinceEpoch}',
           title: 'Wi-Fi Web Share Active',
-          body: 'Direct browser access is live on ${session.displayUrl} with PIN ${session.accessPin}',
+          body: 'Direct browser access is live on ${session.displayUrl}. Open Network & Cloud to see the access PIN.',
           type: NotificationType.transfer,
           priority: NotificationPriority.normal,
           timestamp: DateTime.now(),
@@ -309,6 +344,8 @@ class NetworkTransferRepository implements INetworkTransferRepository {
 
   // ==================== Transfer Queue ====================
 
+  final Set<String> _pausedTaskIds = {};
+
   @override
   Future<Result<NetworkTransferTask>> enqueueTransfer({
     required String fileName,
@@ -316,15 +353,17 @@ class NetworkTransferRepository implements INetworkTransferRepository {
     required String sourcePath,
     required String destinationPath,
     NetworkProtocol? protocol,
+    String? serverId,
     String? cloudProvider,
     int totalBytes = 0,
   }) async {
-    final taskId = 'task_${DateTime.now().millisecondsSinceEpoch}_${_tasks.length}';
+    final taskId = 'task_${DateTime.now().microsecondsSinceEpoch}_${_tasks.length}';
     final task = NetworkTransferTask(
       id: taskId,
       fileName: fileName,
       direction: direction,
       protocol: protocol,
+      serverId: serverId,
       cloudProvider: cloudProvider,
       sourcePath: sourcePath,
       destinationPath: destinationPath,
@@ -345,32 +384,42 @@ class NetworkTransferRepository implements INetworkTransferRepository {
   @override
   Future<void> cancelTransfer(String taskId) async {
     _cancelledTaskIds.add(taskId);
+    _pausedTaskIds.remove(taskId);
     final index = _tasks.indexWhere((t) => t.id == taskId);
     if (index >= 0) {
       _tasks[index] = _tasks[index].copyWith(
         status: TransferStatus.cancelled,
         completedAt: DateTime.now(),
       );
-      _activeTaskIds.remove(taskId);
       _transfersController.add(List.unmodifiable(_tasks));
     }
   }
 
+  /// Pausing stops the in-flight request and discards the partial data;
+  /// [resumeTransfer] restarts the transfer from the beginning (the adapters do
+  /// not support ranged resume).
   @override
   Future<void> pauseTransfer(String taskId) async {
     final index = _tasks.indexWhere((t) => t.id == taskId);
-    if (index >= 0 && _tasks[index].status == TransferStatus.transferring) {
+    if (index < 0) return;
+    final status = _tasks[index].status;
+    if (status == TransferStatus.transferring) {
+      _pausedTaskIds.add(taskId);
+    } else if (status == TransferStatus.pending) {
       _tasks[index] = _tasks[index].copyWith(status: TransferStatus.paused);
-      _activeTaskIds.remove(taskId);
       _transfersController.add(List.unmodifiable(_tasks));
     }
   }
 
   @override
   Future<void> resumeTransfer(String taskId) async {
+    _pausedTaskIds.remove(taskId);
     final index = _tasks.indexWhere((t) => t.id == taskId);
     if (index >= 0 && _tasks[index].status == TransferStatus.paused) {
-      _tasks[index] = _tasks[index].copyWith(status: TransferStatus.pending);
+      _tasks[index] = _tasks[index].copyWith(
+        status: TransferStatus.pending,
+        bytesTransferred: 0,
+      );
       _transfersController.add(List.unmodifiable(_tasks));
       _processNextTask();
     }
@@ -392,7 +441,27 @@ class NetworkTransferRepository implements INetworkTransferRepository {
   @override
   List<NetworkTransferTask> getTransfers() => List.unmodifiable(_tasks);
 
-  void _processNextTask() async {
+  void _updateTask(String id, NetworkTransferTask Function(NetworkTransferTask) change) {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index < 0) return;
+    _tasks[index] = change(_tasks[index]);
+    _transfersController.add(List.unmodifiable(_tasks));
+  }
+
+  void _failTask(String id, String message) {
+    _updateTask(
+      id,
+      (t) => t.status == TransferStatus.cancelled
+          ? t
+          : t.copyWith(
+              status: TransferStatus.failed,
+              errorMessage: message,
+              completedAt: DateTime.now(),
+            ),
+    );
+  }
+
+  void _processNextTask() {
     if (_activeTaskIds.length >= 2) return; // Limit concurrency to 2
 
     final pendingIndex =
@@ -401,75 +470,150 @@ class NetworkTransferRepository implements INetworkTransferRepository {
 
     final task = _tasks[pendingIndex];
     _activeTaskIds.add(task.id);
+    _updateTask(task.id, (t) => t.copyWith(status: TransferStatus.transferring));
 
-    _tasks[pendingIndex] = task.copyWith(
-      status: TransferStatus.transferring,
-      speedBytesPerSec: 1024.0 * 512, // 512 KB/s baseline indicator
-    );
-    _transfersController.add(List.unmodifiable(_tasks));
-
-    // Simulate/execute transfer progress asynchronously
-    try {
-      final total = task.totalBytes > 0 ? task.totalBytes : 1024 * 1024 * 2; // 2MB default
-      int transferred = 0;
-      final step = (total / 5).ceil();
-
-      for (int i = 0; i < 5; i++) {
-        if (_cancelledTaskIds.contains(task.id)) {
-          _activeTaskIds.remove(task.id);
-          return;
-        }
-
-        await Future.delayed(const Duration(milliseconds: 150));
-        transferred = (transferred + step).clamp(0, total);
-
-        final currentIndex = _tasks.indexWhere((t) => t.id == task.id);
-        if (currentIndex >= 0 &&
-            _tasks[currentIndex].status == TransferStatus.transferring) {
-          _tasks[currentIndex] = _tasks[currentIndex].copyWith(
-            bytesTransferred: transferred,
-            totalBytes: total,
-            speedBytesPerSec: 1024.0 * 800,
-          );
-          _transfersController.add(List.unmodifiable(_tasks));
-        }
-      }
-
-      final completedIndex = _tasks.indexWhere((t) => t.id == task.id);
-      if (completedIndex >= 0 &&
-          _tasks[completedIndex].status == TransferStatus.transferring) {
-        _tasks[completedIndex] = _tasks[completedIndex].copyWith(
-          bytesTransferred: total,
-          totalBytes: total,
-          status: TransferStatus.completed,
-          completedAt: DateTime.now(),
-        );
-        _transfersController.add(List.unmodifiable(_tasks));
-
-        // Send completed notification
-        await notificationRepository?.addNotification(AppNotification(
-          id: 'transfer_completed_${task.id}',
-          title: 'Transfer Completed',
-          body: '${task.fileName} transferred successfully (${task.direction.name}).',
-          type: NotificationType.transfer,
-          priority: NotificationPriority.low,
-          timestamp: DateTime.now(),
-          actionRoute: '/transfer',
-        ));
-      }
-    } catch (e) {
-      final failedIndex = _tasks.indexWhere((t) => t.id == task.id);
-      if (failedIndex >= 0) {
-        _tasks[failedIndex] = _tasks[failedIndex].copyWith(
-          status: TransferStatus.failed,
-          errorMessage: e.toString(),
-          completedAt: DateTime.now(),
-        );
-        _transfersController.add(List.unmodifiable(_tasks));
-      }
-    } finally {
+    _runTask(task).catchError((Object e) {
+      _failTask(task.id, 'Transfer failed: $e');
+    }).whenComplete(() {
       _activeTaskIds.remove(task.id);
       _processNextTask();
+    });
+  }
+
+  /// Executes a queued transfer through the real protocol adapter. Nothing is
+  /// simulated: a task completes only when the adapter reports success.
+  Future<void> _runTask(NetworkTransferTask task) async {
+    await _ensureInitialized();
+
+    if (task.cloudProvider != null) {
+      _failTask(task.id, 'Cloud transfers are not available in this version.');
+      return;
     }
+
+    final server = _cachedServers!.where((s) => s.id == task.serverId).firstOrNull;
+    if (server == null) {
+      _failTask(task.id, 'The server for this transfer is no longer configured.');
+      return;
+    }
+    final adapter = _adapters[server.protocol];
+    if (adapter == null) {
+      _failTask(task.id, 'Unsupported network protocol: ${server.protocol.displayName}');
+      return;
+    }
+
+    bool stopRequested() =>
+        _cancelledTaskIds.contains(task.id) || _pausedTaskIds.contains(task.id);
+
+    final watch = Stopwatch()..start();
+    var lastEmitMs = -1000;
+    void onProgress(int done, int total) {
+      if (stopRequested()) return;
+      final ms = watch.elapsedMilliseconds;
+      if (ms - lastEmitMs < 100 && (total <= 0 || done < total)) return;
+      lastEmitMs = ms;
+      _updateTask(
+        task.id,
+        (t) => t.copyWith(
+          bytesTransferred: done,
+          totalBytes: total > 0 ? total : t.totalBytes,
+          speedBytesPerSec: ms > 0 ? done * 1000 / ms : 0.0,
+        ),
+      );
+    }
+
+    Result<Object?> result;
+    var finalSize = task.totalBytes;
+
+    if (task.direction == TransferDirection.download) {
+      // Never overwrite an existing local file.
+      final destination = await _uniqueLocalPath(task.destinationPath);
+      if (destination != task.destinationPath) {
+        _updateTask(task.id, (t) => t.copyWith(destinationPath: destination));
+      }
+      result = await adapter.downloadFile(
+        server,
+        RemoteFileItem(
+          id: task.sourcePath,
+          name: task.fileName,
+          remotePath: task.sourcePath,
+          size: task.totalBytes,
+          isDirectory: false,
+          modifiedAt: DateTime.now(),
+          sourceId: server.id,
+          sourceType: server.protocol.name,
+        ),
+        destination,
+        onProgress: onProgress,
+        isCancelled: stopRequested,
+      );
+      if (result.isSuccess) {
+        try {
+          finalSize = await File(destination).length();
+        } catch (_) {}
+      }
+    } else {
+      try {
+        finalSize = await File(task.sourcePath).length();
+      } catch (_) {}
+      result = await adapter.uploadFile(
+        server,
+        task.sourcePath,
+        task.destinationPath,
+        onProgress: onProgress,
+        isCancelled: stopRequested,
+      );
+    }
+
+    if (_cancelledTaskIds.contains(task.id)) return; // already marked cancelled
+
+    if (_pausedTaskIds.contains(task.id)) {
+      _updateTask(
+        task.id,
+        (t) => t.copyWith(
+          status: TransferStatus.paused,
+          bytesTransferred: 0,
+          speedBytesPerSec: 0.0,
+        ),
+      );
+      return;
+    }
+
+    if (result.isFailure) {
+      _failTask(task.id, result.errorOrNull?.message ?? 'Transfer failed');
+      return;
+    }
+
+    _updateTask(
+      task.id,
+      (t) => t.copyWith(
+        bytesTransferred: finalSize,
+        totalBytes: finalSize,
+        speedBytesPerSec: 0.0,
+        status: TransferStatus.completed,
+        completedAt: DateTime.now(),
+      ),
+    );
+
+    await notificationRepository?.addNotification(AppNotification(
+      id: 'transfer_completed_${task.id}',
+      title: 'Transfer Completed',
+      body: '${task.fileName} transferred successfully (${task.direction.name}).',
+      type: NotificationType.transfer,
+      priority: NotificationPriority.low,
+      timestamp: DateTime.now(),
+      actionRoute: '/transfer',
+    ));
+  }
+
+  Future<String> _uniqueLocalPath(String path) async {
+    if (!await File(path).exists()) return path;
+    final dir = p.dirname(path);
+    final base = p.basenameWithoutExtension(path);
+    final ext = p.extension(path);
+    for (var i = 1; i < 1000; i++) {
+      final candidate = p.join(dir, '$base ($i)$ext');
+      if (!await File(candidate).exists()) return candidate;
+    }
+    return p.join(dir, '${base}_${DateTime.now().millisecondsSinceEpoch}$ext');
   }
 }

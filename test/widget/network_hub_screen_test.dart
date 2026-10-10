@@ -161,6 +161,7 @@ class _FakeNetworkTransferRepository implements INetworkTransferRepository {
     required String sourcePath,
     required String destinationPath,
     NetworkProtocol? protocol,
+    String? serverId,
     String? cloudProvider,
     int totalBytes = 0,
   }) async {

@@ -10,6 +10,7 @@ import '../../core/logging/app_logger.dart';
 import '../../data/monitoring/crash_reporter.dart';
 import '../../data/monitoring/performance_monitor.dart';
 import '../../features/monitoring/presentation/providers/monitoring_providers.dart';
+import '../../features/vault/presentation/providers/vault_lifecycle_guard.dart';
 
 /// Bootstrap coordinator for FileZen application startup.
 class AppBootstrap {
@@ -71,6 +72,8 @@ class _FileZenAppState extends ConsumerState<FileZenApp> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(wapCentralManagerProvider).initialize();
+      // Starts the app-wide Vault auto-lock observer.
+      ref.read(vaultLifecycleGuardProvider);
     });
   }
 

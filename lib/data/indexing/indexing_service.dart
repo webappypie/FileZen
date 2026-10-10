@@ -25,6 +25,8 @@ class IndexingService implements IIndexingService {
       StreamController<IndexingProgress>.broadcast();
 
   IndexingProgress _currentProgress = const IndexingProgress();
+  bool _isPaused = false;
+  Timer? _backgroundSyncTimer;
 
   IndexingService({
     required this.db,
@@ -37,6 +39,38 @@ class IndexingService implements IIndexingService {
 
   @override
   IndexingProgress get currentProgress => _currentProgress;
+
+  bool get isPaused => _isPaused;
+
+  @override
+  void pause() {
+    _isPaused = true;
+    _updateProgress(
+      _currentProgress.copyWith(status: IndexingStatus.paused),
+      null,
+    );
+  }
+
+  @override
+  void resume() {
+    _isPaused = false;
+  }
+
+  @override
+  void startPeriodicBackgroundSync({Duration interval = const Duration(minutes: 5)}) {
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = Timer.periodic(interval, (_) async {
+      if (!_currentProgress.isRunning && !_isPaused) {
+        await runIndexScan();
+      }
+    });
+  }
+
+  @override
+  void stopPeriodicBackgroundSync() {
+    _backgroundSyncTimer?.cancel();
+    _backgroundSyncTimer = null;
+  }
 
   void _updateProgress(IndexingProgress progress, void Function(IndexingProgress)? onProgress) {
     _currentProgress = progress;
@@ -129,11 +163,18 @@ class IndexingService implements IIndexingService {
         for (final file in batch) {
           if (cancellationToken?.isCancelled == true) break;
 
+          while (_isPaused && cancellationToken?.isCancelled != true) {
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+
           try {
             // Incremental check: has file changed since last index?
-            final existing = await (db.select(db.fileRecords)
+            final existingRows = await (db.select(db.fileRecords)
                   ..where((t) => t.path.equals(file.path)))
-                .getSingleOrNull();
+                .get();
+            // More than one row for a path is a leftover from an earlier edit
+            // (the row id embeds the size): treat it as stale and replace them all.
+            final existing = existingRows.length == 1 ? existingRows.single : null;
 
             final timeDiff = existing == null
                 ? 999999
@@ -145,9 +186,18 @@ class IndexingService implements IIndexingService {
                 existing.indexedAt != null) {
               skipped++;
             } else {
+              // Yield briefly for image OCR to keep UI responsive and prevent thermal throttling
+              if (file.category == FileCategory.image) {
+                await Future.delayed(const Duration(milliseconds: 10));
+              }
+
               // Extract text tokens and index into SQLite & FTS5
               final extracted = await _textExtractor.extractContent(file);
-              await _writeIndexRecord(file, extracted);
+              await _writeIndexRecord(
+                file,
+                extracted,
+                replaceIds: existingRows.map((r) => r.id).toList(),
+              );
               indexed++;
             }
           } catch (e) {
@@ -249,11 +299,22 @@ class IndexingService implements IIndexingService {
     }
   }
 
-  Future<void> _writeIndexRecord(FileEntity file, String extractedContent) async {
+  Future<void> _writeIndexRecord(
+    FileEntity file,
+    String extractedContent, {
+    List<String> replaceIds = const [],
+  }) async {
     final fileId = 'file_${file.path.hashCode.abs()}_${file.size}';
     final now = DateTime.now();
 
     await db.transaction(() async {
+      // Drop superseded rows for this path (a changed size yields a new id).
+      for (final oldId in replaceIds) {
+        if (oldId == fileId) continue;
+        await (db.delete(db.fileRecords)..where((t) => t.id.equals(oldId))).go();
+        await db.deleteSearchDocumentByFileId(oldId);
+      }
+
       // 1. Insert or update FileRecord
       await db.into(db.fileRecords).insertOnConflictUpdate(
             FileRecordsCompanion.insert(
@@ -289,11 +350,37 @@ class IndexingService implements IIndexingService {
   Future<Result<void>> indexSingleFile(FileEntity file) async {
     try {
       final extracted = await _textExtractor.extractContent(file);
-      await _writeIndexRecord(file, extracted);
+      final existing = await (db.select(db.fileRecords)
+            ..where((t) => t.path.equals(file.path)))
+          .get();
+      await _writeIndexRecord(
+        file,
+        extracted,
+        replaceIds: existing.map((r) => r.id).toList(),
+      );
       return Result.success(null);
     } catch (e) {
       AppLogger.error('Failed to index file ${file.path}: $e', 'IndexingService');
       return Result.failure(UnknownError(message: 'Index failed: $e'));
+    }
+  }
+
+  @override
+  Future<Result<void>> removeFileByPath(String path) async {
+    try {
+      await db.transaction(() async {
+        final rows = await (db.select(db.fileRecords)
+              ..where((t) => t.path.equals(path)))
+            .get();
+        for (final row in rows) {
+          await db.deleteSearchDocumentByFileId(row.id);
+        }
+        await (db.delete(db.fileRecords)..where((t) => t.path.equals(path))).go();
+      });
+      return Result.success(null);
+    } catch (e) {
+      AppLogger.error('Failed to remove a file from the index: $e', 'IndexingService');
+      return Result.failure(UnknownError(message: 'Remove failed: $e'));
     }
   }
 

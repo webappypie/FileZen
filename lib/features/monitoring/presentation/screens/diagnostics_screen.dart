@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -268,29 +269,33 @@ class _DiagnosticsScreenState extends ConsumerState<DiagnosticsScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.md),
-                FilledButton.tonal(
-                  onPressed: () async {
-                    final newState = !monetization.isAdFreePurchased;
-                    await ref.read(wapCentralManagerProvider).setAdFreePurchased(newState);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            newState
-                                ? 'Simulated Ad-Free purchase activated!'
-                                : 'Simulated Ad-Free purchase revoked.',
+                // Debug builds only: release builds must never expose a way to grant
+                // Ad-Free without a verified Google Play purchase.
+                if (kDebugMode) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  FilledButton.tonal(
+                    onPressed: () async {
+                      final newState = !monetization.isAdFreePurchased;
+                      await ref.read(wapCentralManagerProvider).setAdFreePurchased(newState);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              newState
+                                  ? 'Simulated Ad-Free purchase activated!'
+                                  : 'Simulated Ad-Free purchase revoked.',
+                            ),
                           ),
-                        ),
-                      );
-                    }
-                  },
-                  child: Text(
-                    monetization.isAdFreePurchased
-                        ? 'Simulate Revoke Ad-Free'
-                        : 'Simulate Buy Ad-Free (One-Time)',
+                        );
+                      }
+                    },
+                    child: Text(
+                      monetization.isAdFreePurchased
+                          ? 'Simulate Revoke Ad-Free'
+                          : 'Simulate Buy Ad-Free (One-Time)',
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

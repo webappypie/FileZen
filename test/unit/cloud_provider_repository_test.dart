@@ -1,138 +1,82 @@
 import 'dart:io';
-import 'package:flutter_test/flutter_test.dart';
 
+import 'package:filezen/core/error/app_error.dart';
 import 'package:filezen/data/cloud/cloud_provider_repository.dart';
 import 'package:filezen/domain/models/cloud_models.dart';
+import 'package:filezen/domain/models/network_models.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late Directory tempDir;
-  late String storagePath;
   late CloudProviderRepository repository;
+
+  const account = CloudAccount(
+    id: 'cld_test',
+    provider: CloudProviderType.googleDrive,
+    accountEmail: 'someone@example.com',
+    displayName: 'Test Drive',
+  );
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('filezen_cloud_test_');
-    storagePath = '${tempDir.path}/test_cloud_accounts.json';
-    repository = CloudProviderRepository(customStoragePath: storagePath);
+    repository = CloudProviderRepository(customStoragePath: '${tempDir.path}/cloud.json');
   });
 
   tearDown(() async {
-    if (tempDir.existsSync()) {
-      await tempDir.delete(recursive: true);
-    }
+    if (tempDir.existsSync()) await tempDir.delete(recursive: true);
   });
 
-  group('CloudProviderRepository - Account Management', () {
-    test('Pre-seeds default starter cloud accounts on fresh run', () async {
-      final accounts = await repository.getAccounts();
-      expect(accounts, isNotEmpty);
-      expect(accounts.any((a) => a.provider == CloudProviderType.googleDrive), isTrue);
-      expect(accounts.any((a) => a.provider == CloudProviderType.oneDrive), isTrue);
+  group('CloudProviderRepository (no provider is integrated)', () {
+    test('never reports or seeds accounts, and persists nothing', () async {
+      expect(CloudProviderRepository.isAvailable, isFalse);
+      expect(await repository.getAccounts(), isEmpty);
+      expect(await repository.watchAccounts().first, isEmpty);
+      expect(File('${tempDir.path}/cloud.json').existsSync(), isFalse);
     });
 
-    test('Connects a new Dropbox account and persists configuration', () async {
-      final connectResult = await repository.connectAccount(
-        CloudProviderType.dropbox,
-        email: 'dropbox_user@example.com',
-        displayName: 'My Dropbox',
-      );
-
-      expect(connectResult.isSuccess, isTrue);
-      final account = connectResult.dataOrNull!;
-      expect(account.provider, CloudProviderType.dropbox);
-      expect(account.totalStorageBytes, 2 * 1024 * 1024 * 1024); // 2 GB Dropbox quota
-      expect(account.isConnected, isTrue);
-
-      final allAccounts = await repository.getAccounts();
-      expect(allAccounts.any((a) => a.id == account.id), isTrue);
-
-      // Verify persistence
-      final restoredRepo = CloudProviderRepository(customStoragePath: storagePath);
-      final restored = await restoredRepo.getAccounts();
-      expect(restored.any((a) => a.id == account.id), isTrue);
+    test('connecting an account fails for every provider instead of faking a connection', () async {
+      for (final provider in CloudProviderType.values) {
+        final result = await repository.connectAccount(
+          provider,
+          email: 'a@b.c',
+          displayName: 'x',
+        );
+        expect(result.isFailure, isTrue, reason: provider.name);
+        expect(result.errorOrNull, isA<ProviderUnavailableError>());
+        expect(result.errorOrNull!.message, contains('not available'));
+      }
+      expect(await repository.getAccounts(), isEmpty);
     });
 
-    test('Disconnects a cloud account cleanly', () async {
-      final initial = await repository.getAccounts();
-      final toRemove = initial.first.id;
+    test('listing, quota, download and upload all fail and fabricate nothing', () async {
+      expect((await repository.listCloudFiles(account)).isFailure, isTrue);
+      expect((await repository.refreshQuota(account)).isFailure, isTrue);
 
-      final discResult = await repository.disconnectAccount(toRemove);
-      expect(discResult.isSuccess, isTrue);
-
-      final updated = await repository.getAccounts();
-      expect(updated.any((a) => a.id == toRemove), isFalse);
-    });
-
-    test('Refreshes account quota timestamp', () async {
-      final initial = await repository.getAccounts();
-      final account = initial.first;
-
-      final refreshedResult = await repository.refreshQuota(account);
-      expect(refreshedResult.isSuccess, isTrue);
-      final refreshed = refreshedResult.dataOrNull!;
-      expect(refreshed.lastSyncedAt, isNotNull);
-    });
-  });
-
-  group('CloudProviderRepository - File Operations & On-Demand Transfer', () {
-    test('Lists cloud files and directories', () async {
-      final accounts = await repository.getAccounts();
-      final account = accounts.first;
-
-      final listResult = await repository.listCloudFiles(account);
-      expect(listResult.isSuccess, isTrue);
-      final items = listResult.dataOrNull!;
-      expect(items, isNotEmpty);
-      expect(items.any((i) => i.isDirectory), isTrue);
-      expect(items.any((i) => !i.isDirectory), isTrue);
-    });
-
-    test('Downloads a cloud file to local destination path with progress', () async {
-      final accounts = await repository.getAccounts();
-      final account = accounts.first;
-      final listResult = await repository.listCloudFiles(account);
-      final cloudFile = listResult.dataOrNull!.firstWhere((i) => !i.isDirectory);
-
-      final destPath = '${tempDir.path}/${cloudFile.name}';
-      int progressCallCount = 0;
-
-      final dlResult = await repository.downloadCloudFile(
+      final dest = File('${tempDir.path}/downloaded.bin');
+      final download = await repository.downloadCloudFile(
         account,
-        cloudFile,
-        destPath,
-        onProgress: (received, total) {
-          progressCallCount++;
-          expect(received, greaterThan(0));
-          expect(total, greaterThan(0));
-        },
+        RemoteFileItem(
+          id: '1',
+          name: 'a.bin',
+          remotePath: '/a.bin',
+          size: 10,
+          isDirectory: false,
+          modifiedAt: DateTime(2026),
+          sourceId: account.id,
+          sourceType: 'googleDrive',
+        ),
+        dest.path,
       );
+      expect(download.isFailure, isTrue);
+      expect(dest.existsSync(), isFalse, reason: 'no placeholder file may be written');
 
-      expect(dlResult.isSuccess, isTrue);
-      expect(File(destPath).existsSync(), isTrue);
-      expect(progressCallCount, greaterThan(0));
+      final local = File('${tempDir.path}/local.txt')..writeAsStringSync('hello');
+      final upload = await repository.uploadCloudFile(account, local.path, 'root');
+      expect(upload.isFailure, isTrue);
     });
 
-    test('Uploads local file to cloud on explicit request and updates usage', () async {
-      final accounts = await repository.getAccounts();
-      final account = accounts.first;
-      final initialUsed = account.usedStorageBytes;
-
-      final localFile = File('${tempDir.path}/upload_me.txt');
-      await localFile.writeAsString('FileZen Cloud Upload Content');
-
-      final uploadResult = await repository.uploadCloudFile(
-        account,
-        localFile.path,
-        'root',
-      );
-
-      expect(uploadResult.isSuccess, isTrue);
-      final remoteItem = uploadResult.dataOrNull!;
-      expect(remoteItem.name, 'upload_me.txt');
-      expect(remoteItem.size, localFile.lengthSync());
-
-      final updatedAccounts = await repository.getAccounts();
-      final updated = updatedAccounts.firstWhere((a) => a.id == account.id);
-      expect(updated.usedStorageBytes, initialUsed + localFile.lengthSync());
+    test('disconnecting is a harmless no-op', () async {
+      expect((await repository.disconnectAccount('anything')).isSuccess, isTrue);
     });
   });
 }

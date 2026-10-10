@@ -1,5 +1,7 @@
 # Phase 09 — Vault & Security Engine (Authenticated Enclave)
 
+> **Status note (2026-10-10 re-audit):** the vault cryptography and authentication were reimplemented (AES-256-GCM, random master key, Android Keystore, encrypted index, fail-closed biometrics). See `docs/03_Architecture/DECISION_LOG_ISSUE_7_VAULT_SECURITY.md` §5 and [audit_remediation_status.md](audit_remediation_status.md).
+
 ## Objective
 Establish an enterprise-grade, privacy-centric Vault & Security architecture for FileZen. The engine guarantees hardware-backed and authenticated cryptographic isolation, strict memory safeguards, rate-limiting protections, and zero disk leakage for sensitive user files.
 

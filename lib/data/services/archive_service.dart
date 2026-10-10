@@ -153,6 +153,9 @@ class ArchiveService implements IArchiveService {
       final total = archive.length;
       int processed = 0;
       int totalExtractedBytes = 0;
+      // Header-declared sizes are attacker-controlled; the extraction loop below
+      // also enforces the limits on the bytes actually produced.
+      int actualExtractedBytes = 0;
 
       // Defense 2: Pre-validate all entries before writing any to disk
       for (final file in archive) {
@@ -246,6 +249,13 @@ class ArchiveService implements IArchiveService {
             createdDirs.add(parentDir.path);
           }
           final data = file.content as List<int>;
+          actualExtractedBytes += data.length;
+          if (data.length > maxSingleFileSize || actualExtractedBytes > maxTotalExtractionSize) {
+            throw SecurityError(
+              message: 'Archive expands beyond the permitted size limits.',
+              technicalDetails: 'Decompression bomb protection triggered (actual size exceeds header)',
+            );
+          }
           await outFile.writeAsBytes(data, flush: true);
           createdFiles.add(targetPath);
         } else {

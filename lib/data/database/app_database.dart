@@ -64,4 +64,64 @@ class AppDatabase extends _$AppDatabase {
       ),
     );
   }
+
+  /// Returns a map of category names to their file counts.
+  Future<Map<String, int>> getCategoryCounts() async {
+    final countCol = fileRecords.id.count();
+    final query = selectOnly(fileRecords)
+      ..addColumns([fileRecords.category, countCol])
+      ..groupBy([fileRecords.category]);
+    final rows = await query.get();
+    final result = <String, int>{};
+    for (final row in rows) {
+      final cat = row.read(fileRecords.category);
+      if (cat != null) {
+        result[cat] = row.read(countCol) ?? 0;
+      }
+    }
+    return result;
+  }
+
+  /// Returns total file count for a specific category.
+  Future<int> getFileCountForCategory(String category) async {
+    final countCol = fileRecords.id.count();
+    final query = selectOnly(fileRecords)
+      ..addColumns([countCol])
+      ..where(fileRecords.category.equals(category));
+    final row = await query.getSingleOrNull();
+    return row?.read(countCol) ?? 0;
+  }
+
+  /// Returns total count of files in the download folder.
+  Future<int> getDownloadFilesCount() async {
+    final countCol = fileRecords.id.count();
+    final query = selectOnly(fileRecords)
+      ..addColumns([countCol])
+      ..where(fileRecords.path.like('%/Download/%') |
+          fileRecords.path.like('%/Downloads/%') |
+          fileRecords.path.like('%\\Download\\%') |
+          fileRecords.path.like('%\\Downloads\\%'));
+    final row = await query.getSingleOrNull();
+    return row?.read(countCol) ?? 0;
+  }
+
+  /// Returns all file records for a specific category, sorted by modified date descending.
+  Future<List<FileRecord>> getFilesForCategory(String category) {
+    return (select(fileRecords)
+          ..where((t) => t.category.equals(category))
+          ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)]))
+        .get();
+  }
+
+  /// Returns all file records located in Download directory.
+  Future<List<FileRecord>> getDownloadFiles() {
+    return (select(fileRecords)
+          ..where((t) =>
+              t.path.like('%/Download/%') |
+              t.path.like('%/Downloads/%') |
+              t.path.like('%\\Download\\%') |
+              t.path.like('%\\Downloads\\%'))
+          ..orderBy([(t) => OrderingTerm.desc(t.modifiedAt)]))
+        .get();
+  }
 }

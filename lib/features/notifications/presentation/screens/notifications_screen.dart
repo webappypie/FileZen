@@ -10,6 +10,7 @@ import '../../../clean/presentation/screens/clean_screen.dart';
 import '../../../clean/presentation/screens/duplicate_review_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 import '../../../vault/presentation/screens/vault_screen.dart';
+import '../../../vault/presentation/widgets/secure_surface.dart';
 import '../providers/notification_providers.dart';
 import '../widgets/notification_card.dart';
 import '../widgets/notification_filter_chips.dart';
@@ -31,7 +32,7 @@ class NotificationsScreen extends ConsumerWidget {
     } else if (route == '/clean/duplicates') {
       targetScreen = const DuplicateReviewScreen();
     } else if (route == '/vault') {
-      targetScreen = const VaultScreen();
+      targetScreen = const SecureSurface(child: VaultScreen());
     } else if (route == '/ai') {
       targetScreen = const AiScreen();
     } else if (route == '/settings') {

@@ -115,16 +115,19 @@ void main() {
 
       // Check Monetization section has Ad-Free Pro
       expect(find.text('Ad-Free Pro (One-Time Purchase)'), findsOneWidget);
-      expect(find.text('Non-intrusive ads active. Tap to remove ads permanently.'), findsOneWidget);
+      expect(
+        find.text('Not available yet. One-time ad removal will be offered through Google Play.'),
+        findsOneWidget,
+      );
 
-      // Tap Ad-Free purchase button
-      await tester.tap(find.text('Remove'));
-      await tester.pump();
+      // There is no local control that can grant Ad-Free: the button is disabled
+      // and neither it nor the tile changes entitlement state.
+      final button = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Coming soon'));
+      expect(button.onPressed, isNull);
+      await tester.tap(find.text('Ad-Free Pro (One-Time Purchase)'));
       await tester.pump(const Duration(milliseconds: 100));
-
-      // Verify state updated to ACTIVE chip and active subtitle
-      expect(find.text('ACTIVE'), findsOneWidget);
-      expect(find.text('Active — All advertising is completely disabled.'), findsOneWidget);
+      expect(find.text('ACTIVE'), findsNothing);
+      expect(fakeManager.monetizationState.isAdFreePurchased, isFalse);
     });
   });
 }

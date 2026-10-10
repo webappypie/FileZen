@@ -40,6 +40,11 @@ class IndexingProgress {
     return (processed / totalFilesDiscovered).clamp(0.0, 1.0);
   }
 
+  int get remainingFiles =>
+      (totalFilesDiscovered - (indexedCount + skippedCount)).clamp(0, totalFilesDiscovered);
+
+  bool get isUpToDate => status == IndexingStatus.completed && errorCount == 0;
+
   IndexingProgress copyWith({
     IndexingStatus? status,
     int? totalFilesDiscovered,

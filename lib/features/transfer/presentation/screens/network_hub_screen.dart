@@ -395,7 +395,7 @@ class _NetworkServersTab extends ConsumerWidget {
           body: servers.isEmpty
               ? EmptyView(
                   title: 'No Network Servers',
-                  subtitle: 'Add an SMB share, FTP, SFTP, or WebDAV server to browse remote files.',
+                  subtitle: 'Add a WebDAV server to browse and transfer remote files.',
                   icon: Icons.dns_rounded,
                   actionLabel: 'Add Server',
                   onAction: () {

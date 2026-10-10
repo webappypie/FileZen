@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../app/navigation/navigation_provider.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
 import '../../../../data/wapcentral/wap_client_provider.dart';
+import '../../../../domain/models/ai_models.dart';
+import '../../../../domain/models/file_category.dart';
 import '../../../../domain/repositories/i_wap_service.dart';
+import '../../../ai/presentation/providers/ai_providers.dart';
+import '../../../ai/presentation/screens/collection_detail_screen.dart';
 import '../../../clean/presentation/screens/storage_analysis_screen.dart';
 import '../../../cloud/presentation/screens/cloud_sources_screen.dart';
+import '../../../files/presentation/providers/category_files_providers.dart';
+import '../../../files/presentation/resolvers/file_viewer_resolver.dart';
+import '../../../files/presentation/screens/category_files_screen.dart';
 import '../../../monitoring/presentation/widgets/filezen_ad_banner.dart';
 import '../../../transfer/presentation/screens/network_hub_screen.dart';
 
@@ -45,7 +54,7 @@ class HomeScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  _buildCategoriesGrid(context, isDark),
+                  _buildCategoriesGrid(context, ref, isDark),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Smart Collections Section
@@ -68,11 +77,11 @@ class HomeScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  _buildSmartCollectionsCard(context, isDark),
+                  _buildSmartCollectionsCard(context, ref, isDark),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Ask Your Files Entry Point
-                  _buildAskYourFilesCard(context, isDark),
+                  _buildAskYourFilesCard(context, ref, isDark),
                   const SizedBox(height: AppSpacing.lg),
 
                   // Network Transfer & Cloud Sources Section
@@ -214,14 +223,17 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategoriesGrid(BuildContext context, bool isDark) {
+  Widget _buildCategoriesGrid(BuildContext context, WidgetRef ref, bool isDark) {
+    final countsAsync = ref.watch(categoryFileCountsProvider);
+    final counts = countsAsync.valueOrNull ?? {};
+
     final categories = [
-      ('Images', Icons.image_rounded, AppColors.typeImage, '1,420 files'),
-      ('Videos', Icons.movie_rounded, AppColors.typeVideo, '124 files'),
-      ('Audio', Icons.headphones_rounded, AppColors.typeAudio, '350 files'),
-      ('Documents', Icons.description_rounded, AppColors.typeDocument, '88 files'),
-      ('Downloads', Icons.download_rounded, AppColors.primary, '64 files'),
-      ('Archives', Icons.archive_rounded, AppColors.typeArchive, '15 files'),
+      ('Images', Icons.image_rounded, AppColors.typeImage, FileCategory.image, counts['Images'] ?? 0),
+      ('Videos', Icons.movie_rounded, AppColors.typeVideo, FileCategory.video, counts['Videos'] ?? 0),
+      ('Audio', Icons.headphones_rounded, AppColors.typeAudio, FileCategory.audio, counts['Audio'] ?? 0),
+      ('Documents', Icons.description_rounded, AppColors.typeDocument, FileCategory.document, counts['Documents'] ?? 0),
+      ('Downloads', Icons.download_rounded, AppColors.primary, null, counts['Downloads'] ?? 0),
+      ('Archives', Icons.archive_rounded, AppColors.typeArchive, FileCategory.archive, counts['Archives'] ?? 0),
     ];
 
     return GridView.builder(
@@ -235,11 +247,25 @@ class HomeScreen extends ConsumerWidget {
         childAspectRatio: 1.05,
       ),
       itemBuilder: (context, index) {
-        final (title, icon, color, count) = categories[index];
+        final (title, icon, color, category, count) = categories[index];
+        final countText = countsAsync.isLoading
+            ? '...'
+            : '$count item${count == 1 ? '' : 's'}';
+
         return Card(
           child: InkWell(
             borderRadius: AppSpacing.roundedMd,
-            onTap: () {},
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CategoryFilesScreen(
+                    category: category,
+                    categoryTitle: title,
+                    isDownloads: title == 'Downloads',
+                  ),
+                ),
+              );
+            },
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.sm),
               child: Column(
@@ -263,7 +289,7 @@ class HomeScreen extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    count,
+                    countText,
                     style: AppTypography.bodySmall.copyWith(
                       fontSize: 10,
                       color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
@@ -278,80 +304,138 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildSmartCollectionsCard(BuildContext context, bool isDark) {
+  Widget _buildSmartCollectionsCard(BuildContext context, WidgetRef ref, bool isDark) {
+    const receiptsCol = SmartCollection(
+      id: 'invoices_receipts',
+      title: 'Invoices & Receipts',
+      description: 'Financial receipts, invoices, statements, and payment confirmations',
+      ruleType: SmartCollectionRuleType.receiptsAndInvoices,
+      iconCodePoint: 0xf00b8,
+      colorHex: 0xFF10B981,
+    );
+    final filesAsync = ref.watch(collectionFilesProvider('invoices_receipts'));
+    final files = filesAsync.valueOrNull ?? [];
+
     return Card(
-      child: Padding(
-        padding: AppSpacing.cardPadding,
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent.withValues(alpha: 0.12),
-                    borderRadius: AppSpacing.roundedSm,
+      child: InkWell(
+        borderRadius: AppSpacing.roundedMd,
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const CollectionDetailScreen(collection: receiptsCol),
+            ),
+          );
+        },
+        child: Padding(
+          padding: AppSpacing.cardPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withValues(alpha: 0.12),
+                      borderRadius: AppSpacing.roundedSm,
+                    ),
+                    child: const Icon(Icons.auto_awesome, color: AppColors.accent, size: 24),
                   ),
-                  child: const Icon(Icons.auto_awesome, color: AppColors.accent, size: 24),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Recent Tax Receipts & Invoices',
-                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        '12 documents automatically grouped without moving files',
-                        style: AppTypography.bodySmall.copyWith(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Recent Tax Receipts & Invoices',
+                          style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w600),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          filesAsync.isLoading
+                              ? 'Checking indexed receipts...'
+                              : (files.isEmpty
+                                  ? '0 documents • Scanned automatically when invoices/receipts are indexed'
+                                  : '${files.length} document${files.length == 1 ? '' : 's'} automatically grouped without moving files'),
+                          style: AppTypography.bodySmall.copyWith(
+                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                ],
+              ),
+              if (files.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const Divider(height: 1),
+                const SizedBox(height: AppSpacing.xs),
+                ...files.take(2).map(
+                  (file) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: FileThumbnailWidget(file: file, size: 36),
+                    title: Text(
+                      file.name,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${Formatters.formatFileSize(file.size)} • ${Formatters.formatDate(file.modifiedAt)}',
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 16),
+                    onTap: () => FileViewerResolver.openFile(context, ref, file, files),
                   ),
                 ),
               ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildAskYourFilesCard(BuildContext context, bool isDark) {
+  Widget _buildAskYourFilesCard(BuildContext context, WidgetRef ref, bool isDark) {
     return Card(
       color: isDark ? const Color(0xFF1E293B) : const Color(0xFFEFF6FF),
-      child: Padding(
-        padding: AppSpacing.cardPadding,
-        child: Row(
-          children: [
-            const Icon(Icons.psychology_alt_rounded, size: 36, color: AppColors.primary),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ask Your Files',
-                    style: AppTypography.titleMedium.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w700,
+      child: InkWell(
+        borderRadius: AppSpacing.roundedMd,
+        onTap: () {
+          ref.read(currentTabProvider.notifier).state = 2;
+        },
+        child: Padding(
+          padding: AppSpacing.cardPadding,
+          child: Row(
+            children: [
+              const Icon(Icons.psychology_alt_rounded, size: 36, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ask Your Files',
+                      style: AppTypography.titleMedium.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    'Find documents, resumes, and receipts using natural query search',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      'Find documents, resumes, and receipts using natural query search',
+                      style: AppTypography.bodySmall.copyWith(
+                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const Icon(Icons.arrow_forward_rounded, color: AppColors.primary, size: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -371,7 +455,7 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
             Text(
-              'LAN • SMB • Cloud',
+              'LAN • WebDAV',
               style: AppTypography.labelSmall.copyWith(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w600,
@@ -420,7 +504,7 @@ class HomeScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Browser link & SMB',
+                          'Browser link & WebDAV',
                           style: AppTypography.bodySmall.copyWith(
                             color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                             fontSize: 12,
@@ -471,7 +555,7 @@ class HomeScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Drive, OneDrive, Box',
+                          'Not available yet',
                           style: AppTypography.bodySmall.copyWith(
                             color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                             fontSize: 12,

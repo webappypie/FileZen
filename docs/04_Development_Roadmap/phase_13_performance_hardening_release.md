@@ -1,5 +1,7 @@
 # Phase 13 — Performance Hardening and Release
 
+> **Status note (2026-10-10 re-audit):** checklist items below marked complete for Monetization, Vault, Cloud and OCR were re-verified against the code; several were incorrect. Current per-finding status and open items are in [audit_remediation_status.md](audit_remediation_status.md).
+
 ## Objective
 Execute final production hardening, release engineering, performance scalability validation, accessibility checks, crash/failure resilience, and full release gate verification strictly according to the Master PRD, Architecture documents, and `07_Release_Checklist.md`.
 

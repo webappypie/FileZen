@@ -97,6 +97,14 @@ class IndexingProgressNotifier extends StateNotifier<IndexingProgress> {
   void cancelIndexing() {
     _cancellationToken?.cancel();
   }
+
+  void pauseIndexing() {
+    _service.pause();
+  }
+
+  void resumeIndexing() {
+    _service.resume();
+  }
 }
 
 /// Recent search history queries.

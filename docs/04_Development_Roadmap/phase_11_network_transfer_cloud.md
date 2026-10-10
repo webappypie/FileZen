@@ -1,5 +1,7 @@
 # Phase 11 — Network Transfer and Cloud Sources
 
+> **Status note (2026-10-10 re-audit):** only WebDAV and the Wi-Fi Web Share are implemented end to end. Cloud sources (Google Drive/OneDrive/Dropbox/Box) and FTP/SFTP/SMB were placeholders that fabricated data and are now disabled/failing honestly. Text below describes the original plan. See [audit_remediation_status.md](audit_remediation_status.md).
+
 ## Objective
 Implement approved local-network transfer protocols (SMB, FTP, SFTP, WebDAV, direct Wi-Fi Web Share) and optional cloud file-source adapters (Google Drive, Microsoft OneDrive, Dropbox, Box) without creating dependencies on external services for core local file management. In strict adherence to the Master PRD and Architecture ("External APIs are optional extensions, not dependencies of core FileZen functionality", "Cloud is a file source, not an AI requirement", "Zero automatic cloud uploads"), all cloud and network operations occur exclusively on explicit user instruction.
 

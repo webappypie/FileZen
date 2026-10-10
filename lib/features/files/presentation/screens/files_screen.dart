@@ -11,25 +11,20 @@ import '../../../../core/widgets/error_view.dart';
 import '../../../../core/widgets/loading_view.dart';
 import '../../../../core/widgets/permission_view.dart';
 import '../../../../domain/models/file_clipboard.dart';
-import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/file_entity.dart';
 import '../../../../domain/models/file_operation_models.dart';
 import '../../../../domain/models/file_sort_criteria.dart';
-import '../../../../domain/models/audio_playback_models.dart';
 import '../../../../domain/repositories/i_permission_service.dart';
-import '../../../documents/presentation/screens/document_viewer_screen.dart';
 import '../../../documents/presentation/screens/pdf_studio_screen.dart';
-import '../../../documents/presentation/screens/pdf_viewer_screen.dart';
-import '../../../media/presentation/providers/media_providers.dart';
-import '../../../media/presentation/screens/audio_player_screen.dart';
-import '../../../media/presentation/screens/image_viewer_screen.dart';
-import '../../../media/presentation/screens/video_player_screen.dart';
 import '../../../media/presentation/widgets/mini_audio_player_bar.dart';
 import '../../../search/presentation/providers/search_providers.dart';
 import '../../../ai/presentation/providers/ai_providers.dart';
 import '../../../ai/presentation/widgets/related_files_sheet.dart';
 import '../../../transfer/presentation/providers/network_providers.dart';
 import '../../../transfer/presentation/screens/network_hub_screen.dart';
+import '../../../vault/presentation/services/vault_action_coordinator.dart';
+import '../../../../core/widgets/file_thumbnail_widget.dart';
+import '../resolvers/file_viewer_resolver.dart';
 import '../providers/file_management_providers.dart';
 import '../providers/storage_providers.dart';
 
@@ -169,6 +164,30 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                 builder: (_) => const NetworkHubScreen(initialTabIndex: 0),
               ),
             );
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.lock_outline_rounded),
+          tooltip: 'Move to Vault',
+          onPressed: () async {
+            final nonDirs = selectedFiles.where((f) => !f.isDirectory).toList();
+            if (nonDirs.isEmpty) {
+              _showSnackBar(context, 'Cannot move folders to Vault');
+              return;
+            }
+            final parentDirs = nonDirs.map((f) => p.dirname(f.path)).toSet();
+            await VaultActionCoordinator.moveMultipleToVault(
+              context,
+              ref,
+              nonDirs,
+              // Refresh the listing so moved files disappear immediately.
+              onSuccess: () {
+                for (final dir in parentDirs) {
+                  ref.invalidate(directoryContentsProvider(dir));
+                }
+              },
+            );
+            ref.read(selectedFilePathsProvider.notifier).clear();
           },
         ),
         IconButton(
@@ -462,19 +481,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
               value: isSelected,
               onChanged: (_) => ref.read(selectedFilePathsProvider.notifier).toggle(file.path),
             )
-          : Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: file.category.color.withValues(alpha: 0.12),
-                borderRadius: AppSpacing.roundedSm,
-              ),
-              child: Icon(
-                file.isDirectory ? Icons.folder_rounded : file.category.icon,
-                color: file.isDirectory ? AppColors.folderYellow : file.category.color,
-                size: 22,
-              ),
-            ),
+          : FileThumbnailWidget(file: file, size: 40),
       title: Text(
         file.name,
         style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w500),
@@ -493,16 +500,19 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
               icon: const Icon(Icons.more_vert_rounded, size: 20),
               onSelected: (action) => _handleFileAction(context, file, action, allItems),
               itemBuilder: (ctx) => [
-                if (file.category == FileCategory.image)
-                  const PopupMenuItem(value: 'open_media', child: Text('View Image')),
-                if (file.category == FileCategory.video)
-                  const PopupMenuItem(value: 'open_media', child: Text('Play Video')),
-                if (file.category == FileCategory.audio)
-                  const PopupMenuItem(value: 'open_media', child: Text('Play Audio')),
-                if (file.extension.toLowerCase() == '.pdf')
-                  const PopupMenuItem(value: 'open_media', child: Text('View PDF')),
-                if (file.category == FileCategory.document && file.extension.toLowerCase() != '.pdf')
-                  const PopupMenuItem(value: 'open_media', child: Text('View Document')),
+                if (!file.isDirectory)
+                  const PopupMenuItem(value: 'open_media', child: Text('Open')),
+                if (!file.isDirectory)
+                  const PopupMenuItem(
+                    value: 'vault',
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Move to Vault'),
+                      ],
+                    ),
+                  ),
                 const PopupMenuItem(value: 'details', child: Text('Properties')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 if (!file.isDirectory)
@@ -570,11 +580,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                file.isDirectory ? Icons.folder_rounded : file.category.icon,
-                size: 38,
-                color: file.isDirectory ? AppColors.folderYellow : file.category.color,
-              ),
+              FileThumbnailWidget(file: file, size: 48),
               const SizedBox(height: AppSpacing.xs),
               Text(
                 file.name,
@@ -596,66 +602,21 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
   }
 
   void _handleFileTap(BuildContext context, FileEntity file, List<FileEntity> allFiles) {
-    if (file.category == FileCategory.image) {
-      final images = allFiles.where((f) => f.category == FileCategory.image).map((f) => f.path).toList();
-      final index = images.indexOf(file.path);
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ImageViewerScreen(
-            imagePaths: images.isNotEmpty ? images : [file.path],
-            initialIndex: index >= 0 ? index : 0,
-          ),
-        ),
-      );
-    } else if (file.category == FileCategory.video) {
-      final videos = allFiles.where((f) => f.category == FileCategory.video).map((f) => f.path).toList();
-      final index = videos.indexOf(file.path);
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => VideoPlayerScreen(
-            videoPaths: videos.isNotEmpty ? videos : [file.path],
-            initialIndex: index >= 0 ? index : 0,
-          ),
-        ),
-      );
-    } else if (file.category == FileCategory.audio) {
-      final audioFiles = allFiles.where((f) => f.category == FileCategory.audio).toList();
-      final tracks = (audioFiles.isNotEmpty ? audioFiles : [file]).map((f) {
-        return AudioTrack(
-          id: f.path,
-          path: f.path,
-          title: f.name,
-        );
-      }).toList();
-      final index = tracks.indexWhere((t) => t.path == file.path);
-      final player = ref.read(audioPlayerServiceProvider);
-      player.setQueue(tracks, initialIndex: index >= 0 ? index : 0, autoPlay: true);
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => const AudioPlayerScreen(),
-        ),
-      );
-    } else if (file.extension.toLowerCase() == '.pdf') {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => PdfViewerScreen(filePath: file.path),
-        ),
-      );
-    } else if (file.category == FileCategory.document) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => DocumentViewerScreen(filePath: file.path),
-        ),
-      );
-    } else {
-      _showPropertiesDialog(context, file);
-    }
+    FileViewerResolver.openFile(context, ref, file, allFiles);
   }
 
   void _handleFileAction(BuildContext context, FileEntity file, String action, [List<FileEntity>? allItems]) {
     switch (action) {
       case 'open_media':
         _handleFileTap(context, file, allItems ?? [file]);
+        break;
+      case 'vault':
+        VaultActionCoordinator.moveFileToVault(
+          context,
+          ref,
+          file,
+          onSuccess: () => ref.invalidate(directoryContentsProvider(p.dirname(file.path))),
+        );
         break;
       case 'details':
         _showPropertiesDialog(context, file);
@@ -1004,7 +965,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
                   ref.read(selectedFilePathsProvider.notifier).clear();
                   ref.invalidate(directoryContentsProvider(parentDir));
                   for (final f in files) {
-                    await indexService.removeFile(f.id);
+                    await indexService.removeFileByPath(f.path);
                   }
                   if (!context.mounted) return;
                   _showSnackBar(context, 'Deleted ${files.length} items');
@@ -1047,7 +1008,7 @@ class _FilesScreenState extends ConsumerState<FilesScreen> {
               res.when(
                 success: (_) {
                   ref.invalidate(directoryContentsProvider(p.dirname(file.path)));
-                  ref.read(indexingServiceProvider).removeFile(file.id);
+                  ref.read(indexingServiceProvider).removeFileByPath(file.path);
                   _showSnackBar(context, 'Deleted "${file.name}"');
                 },
                 failure: (e) => _showSnackBar(context, 'Delete failed: ${e.message}'),

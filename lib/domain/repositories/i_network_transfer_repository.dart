@@ -50,6 +50,7 @@ abstract class INetworkTransferRepository {
     required String sourcePath,
     required String destinationPath,
     NetworkProtocol? protocol,
+    String? serverId,
     String? cloudProvider,
     int totalBytes = 0,
   });

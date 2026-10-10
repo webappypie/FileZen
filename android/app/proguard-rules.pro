@@ -7,12 +7,19 @@
 -keep class io.flutter.view.**  { *; }
 -keep class io.flutter.**  { *; }
 -keep class io.flutter.plugins.**  { *; }
+-dontwarn com.google.android.play.core.**
 
 # Drift / SQLite Native Libs
 -keep class com.simonoid.sqlite3.** { *; }
 -keep class org.sqlite.** { *; }
 -keep class sqlite3.** { *; }
 -dontwarn com.simonoid.sqlite3.**
+
+# ML Kit text recognition: optional non-Latin script modules are not bundled
+-dontwarn com.google.mlkit.vision.text.chinese.**
+-dontwarn com.google.mlkit.vision.text.devanagari.**
+-dontwarn com.google.mlkit.vision.text.japanese.**
+-dontwarn com.google.mlkit.vision.text.korean.**
 
 # Gson / JSON Models
 -keepattributes Signature

@@ -4,10 +4,28 @@ import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../data/vault/vault_share_service.dart';
 import '../../../../domain/models/vault_models.dart';
 
 /// Explicit privacy safeguard dialog warning the user before exporting/sharing
 /// a decrypted copy of a Vault file outside the secure enclave.
+/// Runs the secure-share hand-off and reports the real outcome to the user.
+Future<void> runSecureShare(
+  BuildContext context,
+  VaultShareService service,
+  VaultItem item,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final outcome = await service.shareDecrypted(item);
+  final text = switch (outcome.status) {
+    VaultShareStatus.opened =>
+      'Opened a temporary decrypted copy. It is deleted automatically in a couple of minutes.',
+    VaultShareStatus.noAppAvailable => 'No installed app can open or share this file type.',
+    VaultShareStatus.failed => outcome.message ?? 'Sharing failed.',
+  };
+  messenger.showSnackBar(SnackBar(content: Text(text)));
+}
+
 class SecureShareDialog extends StatelessWidget {
   final VaultItem item;
 

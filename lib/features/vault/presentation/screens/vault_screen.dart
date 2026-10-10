@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,7 +6,9 @@ import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/empty_view.dart';
+import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/vault_models.dart';
+import '../../../files/presentation/screens/category_files_screen.dart';
 import '../providers/vault_providers.dart';
 import 'vault_preview_screen.dart';
 import 'vault_settings_screen.dart';
@@ -22,30 +23,16 @@ class VaultScreen extends ConsumerStatefulWidget {
   ConsumerState<VaultScreen> createState() => _VaultScreenState();
 }
 
-class _VaultScreenState extends ConsumerState<VaultScreen>
-    with WidgetsBindingObserver {
+class _VaultScreenState extends ConsumerState<VaultScreen> {
   final TextEditingController _pinController = TextEditingController();
   String? _errorMessage;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
+  // Auto-lock on background is handled app-wide by VaultLifecycleGuard so it
+  // honors the configured timeout and works from any screen.
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _pinController.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      // Auto-lock vault immediately on minimize/pause
-      ref.read(vaultSessionProvider.notifier).lock();
-    }
   }
 
   @override
@@ -273,10 +260,12 @@ class _VaultScreenState extends ConsumerState<VaultScreen>
               error: (err, _) => Center(child: Text('Error: $err')),
               data: (items) {
                 if (items.isEmpty) {
-                  return const EmptyView(
+                  return EmptyView(
                     title: 'Your Vault is Empty',
                     subtitle: 'No private files locked yet. Tap the button below to encrypt sensitive documents, photos, or recordings.',
                     icon: Icons.lock_open_rounded,
+                    actionLabel: 'Add Files Now',
+                    onAction: () => _showAddFileDialog(context),
                   );
                 }
 
@@ -397,9 +386,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen>
     } else if (action == 'share') {
       final confirmed = await SecureShareDialog.show(context, item);
       if (confirmed && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Secure sharing safeguards verified.')),
-        );
+        await runSecureShare(context, ref.read(vaultShareServiceProvider), item);
       }
     } else if (action == 'delete') {
       final confirmed = await showDialog<bool>(
@@ -429,71 +416,122 @@ class _VaultScreenState extends ConsumerState<VaultScreen>
   }
 
   Future<void> _showAddFileDialog(BuildContext context) async {
-    final pathController = TextEditingController();
-    bool deleteSource = true;
-
-    await showDialog(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Lock File in Vault'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: pathController,
-                decoration: const InputDecoration(
-                  labelText: 'File Path to Encrypt',
-                  hintText: '/storage/emulated/0/...',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Securely delete original plaintext file'),
-                value: deleteSource,
-                onChanged: (val) {
-                  setDialogState(() => deleteSource = val ?? true);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () async {
-                final path = pathController.text.trim();
-                if (path.isEmpty || !await File(path).exists()) {
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(content: Text('File does not exist')),
-                    );
-                  }
-                  return;
-                }
-                if (!ctx.mounted) return;
-                Navigator.of(ctx).pop();
-                final res = await ref.read(vaultItemsProvider.notifier).importFile(
-                      path,
-                      deleteSource: deleteSource,
-                    );
-                if (context.mounted) {
-                  if (res.isSuccess) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Encrypted and secured "${res.dataOrNull?.originalFileName}" in Vault')),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed: ${res.errorOrNull?.message}')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Encrypt to Vault'),
-            ),
-          ],
-        ),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.typeVault.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.add_moderator_rounded, color: AppColors.typeVault),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Add Files to Vault', style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Select a category to pick and lock files with hardware-grade AES-256',
+                            style: AppTypography.bodySmall.copyWith(color: AppColors.lightTextSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                const Divider(height: 1),
+                const SizedBox(height: AppSpacing.sm),
+                _buildCategoryTile(
+                  sheetCtx,
+                  category: FileCategory.image,
+                  title: 'Photos & Images',
+                  subtitle: 'Private photos, sensitive ID cards, screenshots',
+                ),
+                _buildCategoryTile(
+                  sheetCtx,
+                  category: FileCategory.document,
+                  title: 'Documents & PDFs',
+                  subtitle: 'Contracts, tax returns, bank statements',
+                ),
+                _buildCategoryTile(
+                  sheetCtx,
+                  category: FileCategory.video,
+                  title: 'Videos',
+                  subtitle: 'Private recordings, personal clips',
+                ),
+                _buildCategoryTile(
+                  sheetCtx,
+                  category: FileCategory.audio,
+                  title: 'Audio & Voice Recordings',
+                  subtitle: 'Voice memos, private interviews',
+                ),
+                _buildCategoryTile(
+                  sheetCtx,
+                  category: null,
+                  isDownloads: true,
+                  title: 'Downloads',
+                  subtitle: 'Downloaded statements and attachments',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCategoryTile(
+    BuildContext sheetCtx, {
+    required FileCategory? category,
+    bool isDownloads = false,
+    required String title,
+    required String subtitle,
+  }) {
+    final icon = isDownloads ? Icons.download_rounded : (category?.icon ?? Icons.folder_rounded);
+    final color = isDownloads ? AppColors.typeArchive : (category?.color ?? AppColors.primary);
+
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: color, size: 22),
+      ),
+      title: Text(title, style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle, style: AppTypography.bodySmall.copyWith(fontSize: 11)),
+      trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+      onTap: () {
+        Navigator.of(sheetCtx).pop();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => CategoryFilesScreen(
+              category: category,
+              isDownloads: isDownloads,
+              categoryTitle: title,
+            ),
+          ),
+        );
+      },
     );
   }
 }

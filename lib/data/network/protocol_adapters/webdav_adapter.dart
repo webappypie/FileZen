@@ -129,8 +129,12 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
     RemoteFileItem file,
     String localDestinationPath, {
     void Function(int received, int total)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     final client = HttpClient()..connectionTimeout = timeoutDuration;
+    // Stream into a sibling .part file so a failed or cancelled download never
+    // leaves a truncated file under the final name (or clobbers an existing one).
+    final partFile = File('$localDestinationPath.part');
     try {
       final scheme = server.port == 443 ? 'https' : 'http';
       final uri = Uri(
@@ -145,40 +149,57 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
 
       final response = await request.close().timeout(timeoutDuration);
       if (response.statusCode != 200) {
+        await response.drain<void>();
         return Result.failure(NetworkError(
           message: 'Download failed with status ${response.statusCode}',
         ));
       }
 
       final totalBytes = response.contentLength > 0 ? response.contentLength : file.size;
-      int receivedBytes = 0;
+      var receivedBytes = 0;
 
-      final targetFile = File(localDestinationPath);
-      final parentDir = targetFile.parent;
-      if (!parentDir.existsSync()) {
-        parentDir.createSync(recursive: true);
+      if (!partFile.parent.existsSync()) {
+        partFile.parent.createSync(recursive: true);
       }
 
-      final sink = targetFile.openWrite();
-      await response.listen((chunk) {
-        sink.add(chunk);
-        receivedBytes += chunk.length;
-        if (onProgress != null) {
-          onProgress(receivedBytes, totalBytes);
+      final sink = partFile.openWrite();
+      var cancelled = false;
+      try {
+        await for (final chunk in response) {
+          if (isCancelled?.call() ?? false) {
+            cancelled = true;
+            break;
+          }
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          onProgress?.call(receivedBytes, totalBytes);
         }
-      }).asFuture();
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
 
-      await sink.flush();
-      await sink.close();
+      if (cancelled) {
+        await _deleteQuietly(partFile);
+        return Result.failure(const OperationCancelledError());
+      }
 
+      await partFile.rename(localDestinationPath);
       return Result.success(localDestinationPath);
     } catch (e) {
+      await _deleteQuietly(partFile);
       return Result.failure(NetworkError(
         message: 'Failed to download WebDAV file: $e',
       ));
     } finally {
-      client.close();
+      client.close(force: true);
     }
+  }
+
+  Future<void> _deleteQuietly(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 
   @override
@@ -187,6 +208,7 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
     String localFilePath,
     String remoteDestinationPath, {
     void Function(int sent, int total)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     final client = HttpClient()..connectionTimeout = timeoutDuration;
     try {
@@ -213,13 +235,17 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
 
       int sentBytes = 0;
       final stream = localFile.openRead();
-      await request.addStream(stream.map((chunk) {
-        sentBytes += chunk.length;
-        if (onProgress != null) {
-          onProgress(sentBytes, totalBytes);
-        }
-        return chunk;
-      }));
+      try {
+        await request.addStream(stream.map((chunk) {
+          if (isCancelled?.call() ?? false) throw const _TransferCancelled();
+          sentBytes += chunk.length;
+          onProgress?.call(sentBytes, totalBytes);
+          return chunk;
+        }));
+      } on _TransferCancelled {
+        request.abort();
+        return Result.failure(const OperationCancelledError());
+      }
 
       final response = await request.close().timeout(timeoutDuration);
       if (response.statusCode != 200 &&
@@ -248,7 +274,7 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
         message: 'Failed to upload file to WebDAV: $e',
       ));
     } finally {
-      client.close();
+      client.close(force: true);
     }
   }
 
@@ -279,7 +305,14 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
       if (hrefMatch == null) continue;
 
       final rawHref = hrefMatch.group(1)?.trim() ?? '';
-      final decodedPath = Uri.decodeComponent(rawHref);
+      // hrefs may be absolute URLs and may contain malformed percent-escapes.
+      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
+      String decodedPath;
+      try {
+        decodedPath = Uri.decodeComponent(hrefPath);
+      } on FormatException {
+        decodedPath = hrefPath;
+      }
 
       // Skip root/self directory match
       final normalizedParent = p.posix.normalize(parentPath);
@@ -312,4 +345,9 @@ class WebDavProtocolAdapter implements ProtocolAdapter {
 
     return items;
   }
+}
+
+/// Thrown from the upload stream to abort a cancelled transfer.
+class _TransferCancelled implements Exception {
+  const _TransferCancelled();
 }

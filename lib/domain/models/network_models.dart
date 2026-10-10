@@ -7,6 +7,10 @@ enum NetworkProtocol {
   sftp,
   webdav;
 
+  /// Whether FileZen has a working client for this protocol. Only WebDAV does;
+  /// the others are listed for saved configs but fail with a clear message.
+  bool get isSupported => this == NetworkProtocol.webdav;
+
   String get displayName => switch (this) {
         NetworkProtocol.smb => 'SMB / Windows Share',
         NetworkProtocol.ftp => 'FTP (File Transfer Protocol)',
@@ -265,6 +269,7 @@ class NetworkTransferTask {
   final String fileName;
   final TransferDirection direction;
   final NetworkProtocol? protocol;
+  final String? serverId;
   final String? cloudProvider;
   final String sourcePath;
   final String destinationPath;
@@ -281,6 +286,7 @@ class NetworkTransferTask {
     required this.fileName,
     required this.direction,
     this.protocol,
+    this.serverId,
     this.cloudProvider,
     required this.sourcePath,
     required this.destinationPath,
@@ -301,6 +307,7 @@ class NetworkTransferTask {
     String? fileName,
     TransferDirection? direction,
     NetworkProtocol? protocol,
+    String? serverId,
     String? cloudProvider,
     String? sourcePath,
     String? destinationPath,
@@ -317,6 +324,7 @@ class NetworkTransferTask {
       fileName: fileName ?? this.fileName,
       direction: direction ?? this.direction,
       protocol: protocol ?? this.protocol,
+      serverId: serverId ?? this.serverId,
       cloudProvider: cloudProvider ?? this.cloudProvider,
       sourcePath: sourcePath ?? this.sourcePath,
       destinationPath: destinationPath ?? this.destinationPath,
@@ -335,6 +343,7 @@ class NetworkTransferTask {
         'fileName': fileName,
         'direction': direction.name,
         'protocol': protocol?.name,
+        'serverId': serverId,
         'cloudProvider': cloudProvider,
         'sourcePath': sourcePath,
         'destinationPath': destinationPath,
@@ -361,6 +370,7 @@ class NetworkTransferTask {
               orElse: () => NetworkProtocol.webdav,
             )
           : null,
+      serverId: json['serverId'] as String?,
       cloudProvider: json['cloudProvider'] as String?,
       sourcePath: json['sourcePath'] as String,
       destinationPath: json['destinationPath'] as String,

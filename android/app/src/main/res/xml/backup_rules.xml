@@ -5,6 +5,8 @@
     <exclude domain="file" path=".filezen_vault" />
     <exclude domain="file" path="app_flutter/.filezen_vault" />
     <exclude domain="file" path="app_flutter/.filezen_monetization.json" />
+    <exclude domain="file" path=".filezen_network_servers.json" />
+    <exclude domain="file" path="app_flutter/.filezen_network_servers.json" />
     <exclude domain="file" path="vault" />
     <exclude domain="database" path="app_database.sqlite" />
     <exclude domain="sharedpref" path="FlutterSecureStorage" />

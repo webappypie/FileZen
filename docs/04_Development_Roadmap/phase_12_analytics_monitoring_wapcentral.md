@@ -1,5 +1,7 @@
 # Phase 12 — Analytics, Crash Monitoring, and WAPCentral App Integration
 
+> **Status note (2026-10-10 re-audit):** the "simulated one-time purchase toggle" described here is not a valid entitlement. It was removed from Settings and limited to debug builds; real Google Play Billing is not implemented. See [audit_remediation_status.md](audit_remediation_status.md).
+
 ## Objective
 Implement privacy-safe analytics, structured crash monitoring, latency performance tracking, and the app-side WAPCentral SDK ecosystem integration strictly according to the `WAPCentral_App_Integration_Guide` and Master PRD specifications.
 

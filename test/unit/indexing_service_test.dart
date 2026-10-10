@@ -120,4 +120,69 @@ void main() {
       expect(indexingService.currentProgress.status, IndexingStatus.cancelled);
     });
   });
+
+  group('Index maintenance keyed by path', () {
+    Future<int> rowCount(String name) async =>
+        (await db.select(db.fileRecords).get()).where((r) => r.name == name).length;
+
+    test('removeFileByPath deletes the record and its full-text entry', () async {
+      await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      expect((await searchRepo.search(const SearchQuery(text: 'guidelines'))).dataOrNull!.length, 1);
+
+      // Entity ids (md5 of path/size/mtime) differ from index row ids, so id-based
+      // removal cannot work for callers that only hold a FileEntity.
+      final entity = await storageRepo.getFileDetails('${tempDir.path}/notes.txt');
+      await indexingService.removeFile(entity.id);
+      expect(await rowCount('notes.txt'), 1, reason: 'entity id does not address index rows');
+
+      final storedPath = (await db.select(db.fileRecords).get()).firstWhere((r) => r.name == 'notes.txt').path;
+      final res = await indexingService.removeFileByPath(storedPath);
+      expect(res.isSuccess, isTrue);
+      expect(await rowCount('notes.txt'), 0);
+      expect((await searchRepo.search(const SearchQuery(text: 'guidelines'))).dataOrNull, isEmpty);
+      // Other files are untouched.
+      expect(await rowCount('todo.md'), 1);
+    });
+
+    test('editing a file so its size changes replaces the old entry instead of duplicating it', () async {
+      await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      final notes = File('${tempDir.path}/notes.txt');
+      await notes.writeAsString('completely different and much longer replacement text about gardening');
+      // Make sure the modification is visible to the incremental check.
+      await notes.setLastModified(DateTime.now().add(const Duration(seconds: 5)));
+
+      final res = await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      expect(res.isSuccess, isTrue);
+      expect(res.dataOrNull!.errorCount, 0);
+      expect(await rowCount('notes.txt'), 1);
+      expect((await searchRepo.search(const SearchQuery(text: 'gardening'))).dataOrNull!.length, 1);
+      expect((await searchRepo.search(const SearchQuery(text: 'guidelines'))).dataOrNull, isEmpty,
+          reason: 'stale text from the previous version must be gone');
+
+      // A further scan must not trip over duplicate rows.
+      final again = await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      expect(again.dataOrNull!.errorCount, 0);
+      expect(again.dataOrNull!.skippedCount, 3);
+    });
+
+    test('a scan heals pre-existing duplicate rows for the same path', () async {
+      await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      final original = (await db.select(db.fileRecords).get()).firstWhere((r) => r.name == 'notes.txt');
+      // Simulate the leftover from the old behaviour: a second row, same path.
+      await db.into(db.fileRecords).insert(FileRecordsCompanion.insert(
+            id: 'file_legacy_duplicate',
+            path: original.path,
+            name: original.name,
+            extension: original.extension,
+            size: BigInt.from(1),
+            modifiedAt: original.modifiedAt,
+            createdAt: original.createdAt,
+          ));
+      expect(await rowCount('notes.txt'), 2);
+
+      final res = await indexingService.runIndexScan(targetPaths: [tempDir.path]);
+      expect(res.dataOrNull!.errorCount, 0);
+      expect(await rowCount('notes.txt'), 1);
+    });
+  });
 }

@@ -6,6 +6,7 @@ import '../../features/files/presentation/screens/files_screen.dart';
 import '../../features/ai/presentation/screens/ai_screen.dart';
 import '../../features/clean/presentation/screens/clean_screen.dart';
 import '../../features/vault/presentation/screens/vault_screen.dart';
+import '../../features/vault/presentation/widgets/secure_surface.dart';
 import '../../features/notifications/presentation/providers/notification_providers.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
@@ -85,15 +86,19 @@ class NavigationShell extends ConsumerWidget {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: currentTab,
-        children: const [
-          HomeScreen(),
-          FilesScreen(),
-          AiScreen(),
-          CleanScreen(),
-          VaultScreen(),
-        ],
+      // The Vault tab (index 4) blocks screenshots / recents thumbnails while visible.
+      body: SecureSurface(
+        active: currentTab == 4,
+        child: IndexedStack(
+          index: currentTab,
+          children: const [
+            HomeScreen(),
+            FilesScreen(),
+            AiScreen(),
+            CleanScreen(),
+            VaultScreen(),
+          ],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentTab,

@@ -34,10 +34,11 @@
 ### 1.4 Network Permissions (`INTERNET`, `ACCESS_NETWORK_STATE`)
 
 - **Purpose:**
-  - Local Area Network (LAN) HTTP server for peer-to-peer file transfer over Wi-Fi.
-  - Opt-in user connections to remote network storage (FTP, SFTP, SMB, WebDAV).
-  - Opt-in cloud file storage synchronization (Google Drive, OneDrive).
+  - Local Area Network (LAN) HTTP server for browser-based file transfer over Wi-Fi (PIN-protected, rate-limited, user-started, stopped on demand).
+  - Opt-in user connections to a **WebDAV** server the user configures. (FTP, SFTP and SMB entries exist in the data model but are *not implemented* and are not offered in the UI.)
+  - ~~Cloud file storage synchronization (Google Drive, OneDrive)~~ — **not implemented in this version**; no cloud account, OAuth or provider API code ships. Do not declare it in the store listing or Data Safety form.
   - WAPCentral platform coordination and ad serving.
+- **Cleartext traffic:** `android:usesCleartextTraffic` is **not** set (platform default: blocked for the Android HTTP stack). FileZen's own sockets (`dart:io` HTTP/WebDAV client and the LAN server) are not governed by that flag and are unaffected. WebDAV uses HTTPS when the configured port is 443 and plain HTTP otherwise (Basic auth over HTTP on a trusted LAN — the user chooses the server). A per-server "use TLS" option is a recommended follow-up.
 - **Privacy Principle:**
   - Zero local user files are uploaded automatically or silently.
   - Core file management remains 100% operational offline.
@@ -65,8 +66,10 @@
     - `.filezen_vault/` (Encrypted containers and manifest)
     - `vault/`
     - `app_database.sqlite` (Local file index)
-    - `FlutterSecureStorage` / `flutter_secure_storage` (Platform Keystore tokens)
+    - `FlutterSecureStorage` / `flutter_secure_storage` (Platform Keystore tokens; not currently used)
     - Monetization cache
+    - `.filezen_network_servers.json` (saved WebDAV servers; passwords inside are Keystore-wrapped and device-bound)
+- **Vault key custody:** the vault master key is wrapped by a hardware-backed Android Keystore key, so a vault is intentionally unrecoverable on a different device or after a factory reset. The privacy policy / onboarding text should say so.
 - **Device-to-Device Transfer:**
   - Sensitive vault containers and platform key tokens are explicitly excluded from device-to-device migration rules to ensure vault contents cannot be decrypted on an unauthenticated destination device.
 
@@ -76,4 +79,14 @@
 
 - **Signing Config:** Production release variants are strictly configured to sign using production release keys via `android/key.properties` or CI environment variables. Debug signing is structurally prohibited for the release buildType.
 - **Code Shrinking & R8/ProGuard:** R8 code shrinking (`isMinifyEnabled = true`), resource shrinking (`isShrinkResources = true`), and targeted ProGuard preservation rules (`proguard-rules.pro`) are enabled for release builds.
-- **Zero Committed Secrets:** All signing passwords, keystore binaries, and production API secrets are strictly ignored by `.gitignore` and omitted from the repository.
+- **Zero Committed Secrets:** All signing passwords, keystore binaries, and production API secrets are strictly ignored by `.gitignore` and omitted from the repository. A previously leaked WAPCentral X-App-Key remains in Git history and **must be rotated** (owner action).
+- **R8 rules:** `-dontwarn` rules are limited to the optional ML Kit non-Latin text-recognition modules (the app only ever creates the Latin recognizer) and Play Core split-install classes (deferred components are not used). No blanket suppression.
+
+---
+
+## 5. Items That Still Block a Truthful Store Submission
+
+- **Ad-removal purchase:** there is no Google Play Billing integration; the Settings tile is disabled ("Coming soon"). Do not advertise an in-app purchase until it is implemented and the product exists in Play Console.
+- **Cloud drives / FTP / SFTP / SMB:** not implemented (see §1.4); keep them out of the listing.
+- **Privacy policy URL, Data Safety form submission, content rating, and store screenshots** are outside the repository and must be completed by the owner.
+- **Ads:** rendering is delegated to the WAPCentral SDKs, which were not verifiable in this repository; confirm consent/UMP and ad-ID declarations with a real device build.

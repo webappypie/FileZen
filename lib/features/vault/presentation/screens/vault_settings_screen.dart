@@ -5,6 +5,7 @@ import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
 import '../../../../app/theme/app_typography.dart';
 import '../providers/vault_providers.dart';
+import '../widgets/secure_surface.dart';
 
 /// Screen managing Vault security policies: PIN change, biometrics, auto-lock timeout, and screenshot protection.
 class VaultSettingsScreen extends ConsumerStatefulWidget {
@@ -20,7 +21,8 @@ class _VaultSettingsScreenState extends ConsumerState<VaultSettingsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final configAsync = ref.watch(vaultSecurityConfigProvider);
 
-    return Scaffold(
+    return SecureSurface(
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Vault Security Settings'),
       ),
@@ -56,7 +58,7 @@ class _VaultSettingsScreenState extends ConsumerState<VaultSettingsScreen> {
                           ),
                           const SizedBox(height: AppSpacing.xxs),
                           Text(
-                            'PBKDF2-HMAC-SHA256 authenticated encryption with strict process isolation.',
+                            'AES-256-GCM encryption with a master key protected by your PIN and the Android Keystore.',
                             style: AppTypography.bodySmall.copyWith(
                               color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                             ),
@@ -90,8 +92,18 @@ class _VaultSettingsScreenState extends ConsumerState<VaultSettingsScreen> {
                   value: config.isBiometricEnabled,
                   onChanged: (val) async {
                     final auth = ref.read(vaultAuthServiceProvider);
-                    await auth.setBiometricEnabled(val);
+                    final ok = await auth.setBiometricEnabled(val);
                     ref.invalidate(vaultSecurityConfigProvider);
+                    if (!ok && val && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Biometric unlock could not be enabled. Make sure a screen lock and '
+                            'a fingerprint or face are set up on this device, then try again.',
+                          ),
+                        ),
+                      );
+                    }
                   },
                 ),
               ),
@@ -142,6 +154,7 @@ class _VaultSettingsScreenState extends ConsumerState<VaultSettingsScreen> {
             ],
           );
         },
+      ),
       ),
     );
   }

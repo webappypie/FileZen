@@ -7,8 +7,10 @@
 # FILEZEN_KEYSTORE_PASSWORD
 # FILEZEN_KEY_ALIAS
 # FILEZEN_KEY_PASSWORD
+# FILEZEN_KEYSTORE_TYPE
 
 storePassword=your_keystore_password
 keyPassword=your_key_password
 keyAlias=filezen_release
 storeFile=../app/release.keystore
+storeType=PKCS12

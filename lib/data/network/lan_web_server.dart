@@ -15,9 +15,18 @@ class LanWebServer {
   final StreamController<LanTransferSession> _sessionController =
       StreamController<LanTransferSession>.broadcast();
 
+  /// Largest upload accepted from a browser (guards the phone's storage).
+  static const int maxUploadBytes = 2 * 1024 * 1024 * 1024;
+
+  /// Wrong-PIN attempts allowed per client address before a temporary lockout.
+  static const int maxPinFailures = 5;
+  static const Duration pinLockout = Duration(seconds: 60);
+
   final List<String> _sharedFilePaths = [];
   String _uploadDirectoryPath = '';
   final Set<String> _authenticatedTokens = {};
+  final Map<String, int> _pinFailures = {};
+  final Map<String, DateTime> _pinLockedUntil = {};
 
   Stream<LanTransferSession> get sessionStream => _sessionController.stream;
   LanTransferSession get currentSession => _session;
@@ -69,7 +78,10 @@ class LanWebServer {
       }
 
       _server = boundServer;
+      bindPort = boundServer.port; // the real port (differs when 0 was requested)
       _authenticatedTokens.clear();
+      _pinFailures.clear();
+      _pinLockedUntil.clear();
 
       final primaryUrl = ipAddresses.isNotEmpty
           ? 'http://${ipAddresses.first}:$bindPort'
@@ -86,7 +98,7 @@ class LanWebServer {
       );
       _sessionController.add(_session);
 
-      AppLogger.info('LanWebServer', 'Started on $primaryUrl with PIN: $pin');
+      AppLogger.info('LanWebServer', 'Started on $primaryUrl');
 
       // Listen for incoming requests
       _server!.listen(
@@ -120,6 +132,8 @@ class LanWebServer {
     }
 
     _authenticatedTokens.clear();
+    _pinFailures.clear();
+    _pinLockedUntil.clear();
     _session = const LanTransferSession(status: LanSessionStatus.stopped);
     _sessionController.add(_session);
     AppLogger.info('LanWebServer', 'Server stopped');
@@ -127,13 +141,14 @@ class LanWebServer {
 
   Future<void> _handleRequest(HttpRequest request) async {
     try {
-      // CORS headers for modern browser compatibility
-      request.response.headers.add('Access-Control-Allow-Origin', '*');
-      request.response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      request.response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pin');
+      // The portal is served by this same server, so no CORS headers are sent:
+      // a wildcard policy would let any website the user visits script this
+      // API (including PIN guessing) from their browser.
+      request.response.headers.set('X-Content-Type-Options', 'nosniff');
+      request.response.headers.set('Cache-Control', 'no-store');
 
       if (request.method == 'OPTIONS') {
-        request.response.statusCode = HttpStatus.ok;
+        request.response.statusCode = HttpStatus.methodNotAllowed;
         await request.response.close();
         return;
       }
@@ -153,11 +168,27 @@ class LanWebServer {
 
       // API: Authentication with PIN
       if (path == '/api/auth' && request.method == 'POST') {
-        final body = await utf8.decodeStream(request);
-        final json = jsonDecode(body) as Map<String, dynamic>;
-        final enteredPin = (json['pin'] as String?)?.trim() ?? '';
+        final client = request.connectionInfo?.remoteAddress.address ?? 'unknown';
+        final lockedUntil = _pinLockedUntil[client];
+        if (lockedUntil != null && DateTime.now().isBefore(lockedUntil)) {
+          _sendJsonResponse(request.response, {
+            'success': false,
+            'error': 'Too many incorrect PINs. Try again in a minute.',
+          }, statusCode: HttpStatus.tooManyRequests);
+          return;
+        }
 
-        if (enteredPin == _session.accessPin) {
+        if (request.contentLength > 4096) {
+          await _rejectAndClose(request, HttpStatus.requestEntityTooLarge, 'Request too large');
+          return;
+        }
+        final body = await utf8.decodeStream(request);
+        final decoded = jsonDecode(body);
+        final enteredPin = decoded is Map ? ((decoded['pin'] as String?)?.trim() ?? '') : '';
+
+        if (_pinMatches(enteredPin)) {
+          _pinFailures.remove(client);
+          _pinLockedUntil.remove(client);
           final token = _generateAuthToken();
           _authenticatedTokens.add(token);
           _session = _session.copyWith(
@@ -171,6 +202,13 @@ class LanWebServer {
             'message': 'Authenticated successfully',
           });
         } else {
+          final failures = (_pinFailures[client] ?? 0) + 1;
+          _pinFailures[client] = failures;
+          if (failures >= maxPinFailures) {
+            _pinFailures.remove(client);
+            _pinLockedUntil[client] = DateTime.now().add(pinLockout);
+            AppLogger.warning('LanWebServer', 'Client locked out after repeated wrong PINs');
+          }
           _sendJsonResponse(request.response, {
             'success': false,
             'error': 'Incorrect PIN',
@@ -180,7 +218,10 @@ class LanWebServer {
       }
 
       // Check authentication for protected routes
-      final isAuth = _isAuthorized(request);
+      final isAuth = _isAuthorized(
+        request,
+        allowQueryToken: path.startsWith('/api/download/') && request.method == 'GET',
+      );
 
       if (path == '/api/files' && request.method == 'GET') {
         if (!isAuth) {
@@ -217,7 +258,7 @@ class LanWebServer {
           return;
         }
 
-        final encodedId = path.replaceFirst('/api/download/', '');
+        final encodedId = Uri.decodeComponent(path.replaceFirst('/api/download/', ''));
         String filePath = '';
         try {
           filePath = utf8.decode(base64Url.decode(encodedId));
@@ -240,7 +281,7 @@ class LanWebServer {
         request.response.headers.contentType = ContentType.parse(mimeType);
         request.response.headers.add(
           'Content-Disposition',
-          'attachment; filename="${Uri.encodeComponent(fileName)}"',
+          "attachment; filename*=UTF-8''${Uri.encodeComponent(fileName)}",
         );
         request.response.headers.contentLength = file.lengthSync();
 
@@ -257,26 +298,49 @@ class LanWebServer {
           return;
         }
 
-        final uploadFileName = request.headers.value('X-File-Name') ??
-            'uploaded_${DateTime.now().millisecondsSinceEpoch}.dat';
-        final saveDir = _uploadDirectoryPath.isNotEmpty
-            ? _uploadDirectoryPath
-            : Directory.systemTemp.path;
+        final declared = request.contentLength;
+        if (declared > maxUploadBytes) {
+          await _rejectAndClose(request, HttpStatus.requestEntityTooLarge, 'File too large');
+          return;
+        }
 
-        final targetFile = File(p.join(saveDir, p.basename(uploadFileName)));
-        final sink = targetFile.openWrite();
+        final saveDir = Directory(await _resolveUploadDirectory());
+        if (!await saveDir.exists()) await saveDir.create(recursive: true);
+        final target = await _uniqueUploadFile(saveDir.path, _sanitizeUploadName(
+          request.headers.value('X-File-Name'),
+        ));
 
-        await request.listen((chunk) {
-          sink.add(chunk);
-        }).asFuture();
-
-        await sink.flush();
+        var received = 0;
+        var tooLarge = false;
+        final sink = target.openWrite();
+        try {
+          await for (final chunk in request) {
+            received += chunk.length;
+            if (received > maxUploadBytes) {
+              tooLarge = true;
+              break;
+            }
+            sink.add(chunk);
+          }
+          await sink.flush();
+        } catch (_) {
+          await sink.close().catchError((_) {});
+          if (await target.exists()) await target.delete();
+          rethrow;
+        }
         await sink.close();
+
+        if (tooLarge) {
+          if (await target.exists()) await target.delete();
+          _sendJsonResponse(request.response, {'success': false, 'error': 'File too large'},
+              statusCode: HttpStatus.requestEntityTooLarge);
+          return;
+        }
 
         _sendJsonResponse(request.response, {
           'success': true,
-          'fileName': p.basename(targetFile.path),
-          'size': targetFile.lengthSync(),
+          'fileName': p.basename(target.path),
+          'size': received,
         });
         return;
       }
@@ -284,6 +348,11 @@ class LanWebServer {
       // Web Interface: Responsive HTML Portal
       if (path == '/' || path == '/index.html') {
         request.response.headers.contentType = ContentType.html;
+        request.response.headers.set(
+          'Content-Security-Policy',
+          "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+              "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        );
         request.response.write(_buildWebPortalHtml());
         await request.response.close();
         return;
@@ -301,22 +370,48 @@ class LanWebServer {
     }
   }
 
-  bool _isAuthorized(HttpRequest request) {
-    // Check Authorization header or X-Token or X-Pin header
+  /// Refuses a request whose body must not be read (for example a multi-GB
+  /// upload): Dart's HttpServer would otherwise hold the response until the
+  /// whole body had been received. Writes the error straight to the socket and
+  /// closes the connection.
+  Future<void> _rejectAndClose(HttpRequest request, int status, String message) async {
+    final reason = status == HttpStatus.requestEntityTooLarge ? 'Payload Too Large' : 'Error';
+    final body = utf8.encode(jsonEncode({'success': false, 'error': message}));
+    final socket = await request.response.detachSocket(writeHeaders: false);
+    socket.add(utf8.encode(
+      'HTTP/1.1 $status $reason\r\n'
+      'Content-Type: application/json\r\n'
+      'Content-Length: ${body.length}\r\n'
+      'Connection: close\r\n\r\n',
+    ));
+    socket.add(body);
+    await socket.flush();
+    socket.destroy();
+  }
+
+  bool _pinMatches(String entered) {
+    final expected = _session.accessPin;
+    if (expected.isEmpty || entered.length != expected.length) return false;
+    var diff = 0;
+    for (var i = 0; i < expected.length; i++) {
+      diff |= expected.codeUnitAt(i) ^ entered.codeUnitAt(i);
+    }
+    return diff == 0;
+  }
+
+  /// A session token is required. Raw PIN headers are deliberately not accepted
+  /// (they would bypass the failed-attempt lockout on /api/auth).
+  ///
+  /// [allowQueryToken] is used only for file downloads: a browser navigation
+  /// from a plain link cannot attach an Authorization header.
+  bool _isAuthorized(HttpRequest request, {bool allowQueryToken = false}) {
     final authHeader = request.headers.value('Authorization');
-    final token = authHeader?.replaceFirst('Bearer ', '').trim() ??
+    String? token = authHeader?.replaceFirst('Bearer ', '').trim() ??
         request.headers.value('X-Token');
-    if (token != null && _authenticatedTokens.contains(token)) {
-      return true;
+    if (token == null && allowQueryToken) {
+      token = request.uri.queryParameters['token'];
     }
-
-    // Direct PIN header access
-    final pinHeader = request.headers.value('X-Pin');
-    if (pinHeader != null && pinHeader == _session.accessPin) {
-      return true;
-    }
-
-    return false;
+    return token != null && _authenticatedTokens.contains(token);
   }
 
   void _sendJsonResponse(HttpResponse response, Map<String, dynamic> data,
@@ -356,14 +451,50 @@ class LanWebServer {
   }
 
   String _generateRandomPin() {
-    final random = Random();
-    return (1000 + random.nextInt(9000)).toString();
+    // 6 digits from a cryptographically secure source.
+    return (100000 + Random.secure().nextInt(900000)).toString();
   }
 
   String _generateAuthToken() {
     final random = Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     return base64Url.encode(bytes);
+  }
+
+  /// Browser uploads land in a visible folder (Downloads/FileZen on Android),
+  /// not the app cache, unless an explicit directory was configured.
+  Future<String> _resolveUploadDirectory() async {
+    if (_uploadDirectoryPath.isNotEmpty) return _uploadDirectoryPath;
+    if (Platform.isAndroid) return '/storage/emulated/0/Download/FileZen';
+    return p.join(Directory.systemTemp.path, 'filezen_uploads');
+  }
+
+  /// The header is percent-encoded by the portal so any file name is legal.
+  String _sanitizeUploadName(String? headerValue) {
+    var name = headerValue ?? '';
+    try {
+      name = Uri.decodeComponent(name);
+    } on FormatException {
+      // keep raw value
+    }
+    name = p.basename(name.replaceAll('\\', '/'));
+    name = name.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+    if (name.isEmpty || name == '.' || name == '..') {
+      name = 'uploaded_${DateTime.now().millisecondsSinceEpoch}.dat';
+    }
+    return name;
+  }
+
+  Future<File> _uniqueUploadFile(String dir, String name) async {
+    var candidate = File(p.join(dir, name));
+    if (!await candidate.exists()) return candidate;
+    final base = p.basenameWithoutExtension(name);
+    final ext = p.extension(name);
+    for (var i = 1; i < 1000; i++) {
+      candidate = File(p.join(dir, '$base ($i)$ext'));
+      if (!await candidate.exists()) return candidate;
+    }
+    return File(p.join(dir, '${base}_${DateTime.now().millisecondsSinceEpoch}$ext'));
   }
 
   String _buildWebPortalHtml() {
@@ -483,8 +614,8 @@ class LanWebServer {
 
   <div class="card" id="authCard">
     <h2>Security Verification</h2>
-    <p>Enter the 4-digit PIN displayed on your FileZen mobile app to access files.</p>
-    <input type="password" id="pinInput" placeholder="Enter 4-digit PIN" maxlength="6" autofocus />
+    <p>Enter the 6-digit PIN displayed on your FileZen mobile app to access files.</p>
+    <input type="password" id="pinInput" placeholder="Enter 6-digit PIN" maxlength="6" autocomplete="off" autofocus />
     <button onclick="authenticate()">Connect to Device</button>
     <p id="authError" style="color: #EF4444; margin-top: 8px; display: none;">Invalid PIN. Please try again.</p>
   </div>
@@ -495,9 +626,9 @@ class LanWebServer {
     <div id="fileList">Loading files...</div>
 
     <div class="dropzone" id="dropzone" onclick="document.getElementById('fileUpload').click()">
-      <p style="margin: 0; font-weight: 600;">+ Click or drop files here to upload to FileZen</p>
-      <input type="file" id="fileUpload" class="hidden" onchange="uploadFile(this.files[0])" />
+      <p id="dropLabel" style="margin: 0; font-weight: 600;">+ Click or drop files here to upload to FileZen</p>
     </div>
+    <input type="file" id="fileUpload" class="hidden" onchange="uploadFile(this.files[0])" />
   </div>
 
   <script>
@@ -547,51 +678,84 @@ class LanWebServer {
         }
         const data = await res.json();
         const listEl = document.getElementById('fileList');
+        listEl.textContent = '';
 
         if (!data.files || data.files.length === 0) {
-          listEl.innerHTML = '<p>No files currently shared by device.</p>';
+          listEl.textContent = 'No files currently shared by device.';
           return;
         }
 
-        listEl.innerHTML = data.files.map(f => `
-          <div class="file-item">
-            <div>
-              <div style="font-weight: 600;">\${f.name}</div>
-              <div style="font-size: 12px; color: var(--text-muted);">\${(f.size / (1024 * 1024)).toFixed(2)} MB</div>
-            </div>
-            <a class="btn-download" href="/api/download/\${f.id}?token=\${authToken}" target="_blank">Download</a>
-          </div>
-        `).join('');
+        // File names come from the phone and are untrusted: build the DOM with
+        // textContent only, never innerHTML.
+        data.files.forEach(function (f) {
+          const row = document.createElement('div');
+          row.className = 'file-item';
+          const info = document.createElement('div');
+          const nameEl = document.createElement('div');
+          nameEl.style.fontWeight = '600';
+          nameEl.textContent = f.name;
+          const sizeEl = document.createElement('div');
+          sizeEl.style.cssText = 'font-size: 12px; color: var(--text-muted);';
+          sizeEl.textContent = (f.size / (1024 * 1024)).toFixed(2) + ' MB';
+          info.appendChild(nameEl);
+          info.appendChild(sizeEl);
+          const link = document.createElement('a');
+          link.className = 'btn-download';
+          link.textContent = 'Download';
+          link.rel = 'noopener';
+          link.href = '/api/download/' + encodeURIComponent(f.id) + '?token=' + encodeURIComponent(authToken);
+          row.appendChild(info);
+          row.appendChild(link);
+          listEl.appendChild(row);
+        });
       } catch (e) {
-        document.getElementById('fileList').innerHTML = '<p>Failed to load files: ' + e.message + '</p>';
+        document.getElementById('fileList').textContent = 'Failed to load files: ' + e.message;
       }
+    }
+
+    function setDropLabel(text, color) {
+      const label = document.getElementById('dropLabel');
+      label.textContent = text;
+      label.style.color = color || '';
     }
 
     async function uploadFile(file) {
       if (!file) return;
-      const dropzone = document.getElementById('dropzone');
-      dropzone.innerText = 'Uploading ' + file.name + '...';
+      setDropLabel('Uploading ' + file.name + '...', '');
 
       try {
         const res = await fetch('/api/upload', {
           method: 'POST',
           headers: {
             'Authorization': 'Bearer ' + authToken,
-            'X-File-Name': file.name
+            'X-File-Name': encodeURIComponent(file.name)
           },
           body: file
         });
-        const data = await res.json();
-        if (data.success) {
-          dropzone.innerHTML = '<p style="color: var(--accent); margin: 0;">✓ Uploaded ' + file.name + ' successfully!</p>';
-          setTimeout(() => {
-            dropzone.innerHTML = '<p style="margin: 0; font-weight: 600;">+ Click or drop files here to upload to FileZen</p>';
-          }, 3000);
+        let data = {};
+        try { data = await res.json(); } catch (_) {}
+        if (res.ok && data.success) {
+          setDropLabel('Uploaded ' + data.fileName + ' successfully!', 'var(--accent)');
+        } else {
+          setDropLabel('Upload failed: ' + (data.error || ('HTTP ' + res.status)), '#EF4444');
         }
       } catch (e) {
-        dropzone.innerHTML = '<p style="color: #EF4444; margin: 0;">Upload failed: ' + e.message + '</p>';
+        setDropLabel('Upload failed: ' + e.message, '#EF4444');
       }
+      document.getElementById('fileUpload').value = '';
+      setTimeout(function () {
+        setDropLabel('+ Click or drop files here to upload to FileZen', '');
+      }, 4000);
     }
+
+    const dropzone = document.getElementById('dropzone');
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      dropzone.addEventListener(evt, function (e) { e.preventDefault(); });
+    });
+    dropzone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
+    });
   </script>
 </body>
 </html>''';

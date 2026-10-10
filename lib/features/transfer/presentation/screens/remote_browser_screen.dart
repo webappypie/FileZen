@@ -86,6 +86,7 @@ class _RemoteBrowserScreenState extends ConsumerState<RemoteBrowserScreen> {
           sourcePath: file.remotePath,
           destinationPath: destPath,
           protocol: widget.server.protocol,
+          serverId: widget.server.id,
           totalBytes: file.size,
         );
 

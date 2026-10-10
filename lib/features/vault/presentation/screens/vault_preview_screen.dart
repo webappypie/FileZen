@@ -12,6 +12,7 @@ import '../../../../domain/models/file_category.dart';
 import '../../../../domain/models/vault_models.dart';
 import '../providers/vault_providers.dart';
 import '../widgets/secure_share_dialog.dart';
+import '../widgets/secure_surface.dart';
 
 /// Private, isolated in-memory viewer for Vault files with zero disk caching.
 class VaultPreviewScreen extends ConsumerStatefulWidget {
@@ -63,23 +64,25 @@ class _VaultPreviewScreenState extends ConsumerState<VaultPreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.item.originalFileName),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            tooltip: 'Share Securely',
-            onPressed: () => _handleShare(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.file_upload_outlined),
-            tooltip: 'Export / Restore to Storage',
-            onPressed: () => _handleExport(context),
-          ),
-        ],
+    return SecureSurface(
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.item.originalFileName),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.share_outlined),
+              tooltip: 'Share Securely',
+              onPressed: () => _handleShare(context),
+            ),
+            IconButton(
+              icon: const Icon(Icons.file_upload_outlined),
+              tooltip: 'Export / Restore to Storage',
+              onPressed: () => _handleExport(context),
+            ),
+          ],
+        ),
+        body: _buildBody(context),
       ),
-      body: _buildBody(context),
     );
   }
 
@@ -161,9 +164,7 @@ class _VaultPreviewScreenState extends ConsumerState<VaultPreviewScreen> {
     final confirmed = await SecureShareDialog.show(context, widget.item);
     if (!confirmed || !context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Secure sharing safeguards verified.')),
-    );
+    await runSecureShare(context, ref.read(vaultShareServiceProvider), widget.item);
   }
 
   Future<void> _handleExport(BuildContext context) async {

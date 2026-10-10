@@ -10,12 +10,21 @@ plugins {
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    val rawProperties = Properties()
+    keystorePropertiesFile.inputStream().reader(Charsets.UTF_8).use { reader ->
+        rawProperties.load(reader)
+    }
+    rawProperties.forEach { key, value ->
+        val cleanKey = key.toString().removePrefix("\uFEFF").trim()
+        keystoreProperties[cleanKey] = value
+    }
 }
+
+
 
 android {
     namespace = "com.webappypie.filezen"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -41,6 +50,9 @@ android {
                 ?: System.getenv("FILEZEN_KEY_ALIAS")
             val keyPasswordVal = keystoreProperties.getProperty("keyPassword")
                 ?: System.getenv("FILEZEN_KEY_PASSWORD")
+            val keyStoreType = keystoreProperties.getProperty("storeType")
+                ?: System.getenv("FILEZEN_KEYSTORE_TYPE")
+                ?: "PKCS12"
 
             if (!keyStorePath.isNullOrBlank()) {
                 val resolvedStoreFile = if (file(keyStorePath).isAbsolute) {
@@ -53,6 +65,7 @@ android {
                     storePassword = keyStorePassword
                     keyAlias = keyAliasName
                     keyPassword = keyPasswordVal
+                    storeType = keyStoreType
                 }
             }
         }
@@ -78,6 +91,11 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    // Host-JVM unit tests for the native vault crypto primitives (test-only).
+    testImplementation("junit:junit:4.13.2")
 }
 
 flutter {

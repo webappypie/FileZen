@@ -1,136 +1,100 @@
 import 'dart:io';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path/path.dart' as p;
+
 import '../../core/logging/app_logger.dart';
 import '../../domain/models/ai_models.dart';
 import '../../domain/repositories/i_ocr_service.dart';
 
-/// Pure on-device OCR service extracting text from screenshots, documents, and photos.
-/// Operates 100% offline with zero cloud dependency.
+/// Real on-device OCR service powered by Google ML Kit Text Recognition.
+///
+/// Runs fully on-device with the bundled Latin-script model (no network, no
+/// upload). Only the Latin recognizer is ever created, which is why the optional
+/// Chinese/Japanese/Korean/Devanagari ML Kit classes can be left out of the APK
+/// (see the `-dontwarn` rules in android/app/proguard-rules.pro).
+///
+/// Where ML Kit is unavailable (desktop/host builds) the service reports no text
+/// rather than guessing from the file's bytes or name.
 class OcrService implements IOcrService {
-  const OcrService();
+  final TextRecognizer? _customRecognizer;
 
-  @override
-  Future<bool> isOcrAvailable() async {
-    // Pure local on-device OCR engine is always available
-    return true;
+  const OcrService({TextRecognizer? recognizer}) : _customRecognizer = recognizer;
+
+  bool get _mlKitUsable => Platform.isAndroid || Platform.isIOS || _customRecognizer != null;
+
+  TextRecognizer _createRecognizer() {
+    return _customRecognizer ?? TextRecognizer(script: TextRecognitionScript.latin);
   }
 
   @override
-  Future<OcrExtractionResult> extractTextFromImage(String imagePath) async {
-    final file = File(imagePath);
-    if (!await file.exists()) {
-      return OcrExtractionResult(
+  Future<bool> isOcrAvailable() async => _mlKitUsable;
+
+  OcrExtractionResult _empty(String imagePath) => OcrExtractionResult(
         filePath: imagePath,
         extractedText: '',
         confidence: 0.0,
         timestamp: DateTime.now(),
       );
-    }
 
+  @override
+  Future<OcrExtractionResult> extractTextFromImage(String imagePath) async {
+    if (!_mlKitUsable) return _empty(imagePath);
+
+    final file = File(imagePath);
+    if (!await file.exists() || await file.length() == 0) return _empty(imagePath);
+
+    TextRecognizer? recognizer;
     try {
-      final fileName = p.basenameWithoutExtension(imagePath).toLowerCase();
+      final inputImage = InputImage.fromFilePath(imagePath);
+      recognizer = _createRecognizer();
+      final RecognizedText recognizedText = await recognizer.processImage(inputImage);
+
       final lines = <String>[];
-      final textBuffer = StringBuffer();
-
-      // Check for screenshot or OTP indicators in file or path
-      final isScreenshot = imagePath.toLowerCase().contains('screenshot');
-      if (isScreenshot) {
-        lines.add('Screenshot');
-        if (fileName.contains('otp') || fileName.contains('code') || fileName.contains('verify')) {
-          lines.add('Verification Code OTP');
-          textBuffer.write('OTP Verification Code ');
-        }
-      }
-
-      // Check for receipt / invoice indicators
-      if (fileName.contains('receipt') ||
-          fileName.contains('invoice') ||
-          fileName.contains('bill') ||
-          fileName.contains('payment')) {
-        lines.add('Receipt Invoice Total Tax Payment');
-        textBuffer.write('Receipt Invoice Total Tax Payment ');
-      }
-
-      // Check for identity document indicators
-      if (RegExp(r'\b(id|passport|license|card|aadhaar)\b').hasMatch(fileName)) {
-        lines.add('Identity Document Card License');
-        textBuffer.write('Identity Document Card License ');
-      }
-
-      // Extract ASCII text sequences embedded within image metadata/header chunks
-      final bytesToRead = (await file.length()).clamp(0, 32768);
-      if (bytesToRead > 0) {
-        final raf = await file.open(mode: FileMode.read);
-        final headerBytes = await raf.read(bytesToRead);
-        await raf.close();
-
-        final asciiStrings = _extractAsciiStrings(headerBytes, minLength: 4);
-        for (final str in asciiStrings) {
-          if (_isMeaningfulWord(str) && !lines.contains(str)) {
-            lines.add(str);
-            textBuffer.write('$str ');
+      final confidences = <double>[];
+      final languages = <String, int>{};
+      for (final block in recognizedText.blocks) {
+        for (final line in block.lines) {
+          final trimmed = line.text.trim();
+          if (trimmed.isEmpty) continue;
+          lines.add(trimmed);
+          final c = line.confidence;
+          if (c != null) confidences.add(c);
+          for (final lang in line.recognizedLanguages) {
+            if (lang.isNotEmpty && lang != 'und') languages.update(lang, (n) => n + 1, ifAbsent: () => 1);
           }
         }
       }
 
-      final extractedText = textBuffer.toString().trim();
-      final confidence = extractedText.isNotEmpty ? 0.95 : 0.0;
+      final fullText = recognizedText.text.trim();
+      final confidence = fullText.isEmpty
+          ? 0.0
+          : (confidences.isEmpty
+              ? 0.0
+              : confidences.reduce((a, b) => a + b) / confidences.length);
+      final language = languages.isEmpty
+          ? 'und'
+          : (languages.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).first.key;
 
       AppLogger.info(
-        'On-device OCR extracted ${lines.length} segments from ${p.basename(imagePath)} (confidence: $confidence)',
+        'ML Kit OCR processed ${p.basename(imagePath)}: ${lines.length} lines detected',
         'OcrService',
       );
 
       return OcrExtractionResult(
         filePath: imagePath,
-        extractedText: extractedText,
-        detectedLanguage: 'en',
+        extractedText: fullText,
+        detectedLanguage: language,
         confidence: confidence,
         timestamp: DateTime.now(),
         lines: lines,
       );
     } catch (e) {
-      AppLogger.error('OCR extraction failed for $imagePath: $e', 'OcrService');
-      return OcrExtractionResult(
-        filePath: imagePath,
-        extractedText: '',
-        confidence: 0.0,
-        timestamp: DateTime.now(),
-      );
-    }
-  }
-
-  /// Extracts printable ASCII character runs from raw binary buffers.
-  List<String> _extractAsciiStrings(List<int> bytes, {int minLength = 4}) {
-    final results = <String>[];
-    final current = StringBuffer();
-
-    for (final b in bytes) {
-      if ((b >= 32 && b <= 126)) {
-        current.writeCharCode(b);
-      } else {
-        if (current.length >= minLength) {
-          final s = current.toString().trim();
-          if (s.length >= minLength) {
-            results.add(s);
-          }
-        }
-        current.clear();
+      AppLogger.warning('ML Kit OCR extraction error for $imagePath: $e', 'OcrService');
+      return _empty(imagePath);
+    } finally {
+      if (_customRecognizer == null && recognizer != null) {
+        await recognizer.close();
       }
     }
-
-    if (current.length >= minLength) {
-      results.add(current.toString().trim());
-    }
-
-    return results;
-  }
-
-  bool _isMeaningfulWord(String word) {
-    if (word.length < 3 || word.length > 30) return false;
-    // Skip binary header identifiers like JFIF, Exif, XML standard headers
-    const skip = {'jfif', 'exif', 'photoshop', 'adobe', 'icc_profile', 'http', 'xmlns'};
-    if (skip.contains(word.toLowerCase())) return false;
-    return RegExp(r'^[a-zA-Z0-9_\-\s]+$').hasMatch(word);
   }
 }

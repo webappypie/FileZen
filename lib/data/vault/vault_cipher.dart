@@ -3,8 +3,12 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
-/// Cryptographic engine implementing PBKDF2-HMAC-SHA256 key derivation,
-/// CTR keystream authenticated encryption, and constant-time integrity verification.
+/// LEGACY (v1) vault format support plus shared helpers.
+///
+/// The v1 container (HMAC-SHA256 CTR keystream, PIN-derived key, one IV shared
+/// by metadata and content) is NOT used for any new data. It remains only so
+/// existing v1 containers can be decrypted once and migrated to the AES-256-GCM
+/// v2 format (see [VaultContainer] and `VaultStorageService`).
 class VaultCipher {
   static const String magicHeader = 'ZENVAULT\x01';
   static const int saltLength = 32;
@@ -24,20 +28,27 @@ class VaultCipher {
   }
 
   /// Derives a 64-byte key material (32 bytes encryption key + 32 bytes HMAC auth key)
-  /// from a password/PIN and salt using standard PBKDF2-HMAC-SHA256.
+  /// from raw secret key bytes and salt using standard PBKDF2-HMAC-SHA256.
+  ({Uint8List encKey, Uint8List authKey}) deriveKeysFromBytes(
+    List<int> secretBytes,
+    Uint8List salt, {
+    int iterations = pbkdf2Iterations,
+  }) {
+    final block1 = _pbkdf2Block(secretBytes, salt, 1, iterations);
+    final block2 = _pbkdf2Block(secretBytes, salt, 2, iterations);
+
+    final encKey = Uint8List.fromList(block1);
+    final authKey = Uint8List.fromList(block2);
+    return (encKey: encKey, authKey: authKey);
+  }
+
+  /// Derives a 64-byte key material from a password/PIN and salt using standard PBKDF2-HMAC-SHA256.
   ({Uint8List encKey, Uint8List authKey}) deriveKeys(
     String pin,
     Uint8List salt, {
     int iterations = pbkdf2Iterations,
   }) {
-    final pinBytes = utf8.encode(pin);
-    // Request 64 bytes (2 blocks of 32 bytes)
-    final block1 = _pbkdf2Block(pinBytes, salt, 1, iterations);
-    final block2 = _pbkdf2Block(pinBytes, salt, 2, iterations);
-
-    final encKey = Uint8List.fromList(block1);
-    final authKey = Uint8List.fromList(block2);
-    return (encKey: encKey, authKey: authKey);
+    return deriveKeysFromBytes(utf8.encode(pin), salt, iterations: iterations);
   }
 
   Uint8List _pbkdf2Block(
@@ -94,11 +105,14 @@ class VaultCipher {
   Uint8List encryptPayload({
     required List<int> plaintext,
     required Map<String, dynamic> metadata,
-    required String pin,
+    String? pin,
+    List<int>? secretKey,
   }) {
+    assert(pin != null || secretKey != null, 'Either pin or secretKey must be provided');
     final salt = generateRandomBytes(saltLength);
     final iv = generateRandomBytes(ivLength);
-    final keys = deriveKeys(pin, salt);
+    final secretBytes = secretKey ?? utf8.encode(pin!);
+    final keys = deriveKeysFromBytes(secretBytes, salt);
 
     final metadataJsonBytes = Uint8List.fromList(utf8.encode(jsonEncode(metadata)));
     final plaintextBytes = Uint8List.fromList(plaintext);
@@ -153,8 +167,10 @@ class VaultCipher {
   /// Decrypts and authenticates a .zenvault container.
   ({Uint8List plaintext, Map<String, dynamic> metadata}) decryptPayload({
     required Uint8List containerBytes,
-    required String pin,
+    String? pin,
+    List<int>? secretKey,
   }) {
+    assert(pin != null || secretKey != null, 'Either pin or secretKey must be provided');
     final magicBytes = utf8.encode(magicHeader);
     if (containerBytes.length < magicBytes.length + saltLength + ivLength + 4 + hmacTagLength) {
       throw const FormatException('Invalid or corrupt vault container: file too small');
@@ -173,7 +189,7 @@ class VaultCipher {
     final iv = containerBytes.sublist(pos, pos + ivLength);
     pos += ivLength;
 
-    final byteData = ByteData.view(containerBytes.buffer);
+    final byteData = ByteData.sublistView(containerBytes);
     final metaLen = byteData.getUint32(pos, Endian.big);
     pos += 4;
 
@@ -190,8 +206,9 @@ class VaultCipher {
 
     final expectedTag = containerBytes.sublist(pos, pos + hmacTagLength);
 
-    // Derive keys from supplied PIN and container's salt
-    final keys = deriveKeys(pin, salt);
+    // Derive keys from supplied secret key or PIN and container's salt
+    final secretBytes = secretKey ?? utf8.encode(pin!);
+    final keys = deriveKeysFromBytes(secretBytes, salt);
 
     // Verify HMAC authentication tag in constant time
     final hmac = Hmac(sha256, keys.authKey);

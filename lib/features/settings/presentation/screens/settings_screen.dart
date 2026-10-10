@@ -145,7 +145,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.wifi_tethering_rounded, color: AppColors.primary),
                   title: const Text('Wi-Fi Web Share & LAN Transfer'),
-                  subtitle: const Text('Direct browser transfer, SMB, FTP, SFTP, and WebDAV.'),
+                  subtitle: const Text('Direct browser transfer and WebDAV servers.'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () {
                     Navigator.of(context).push(
@@ -190,42 +190,21 @@ class SettingsScreen extends ConsumerWidget {
               subtitle: Text(
                 monetization.isAdFreePurchased
                     ? 'Active — All advertising is completely disabled.'
-                    : 'Non-intrusive ads active. Tap to remove ads permanently.',
+                    : 'Not available yet. One-time ad removal will be offered through Google Play.',
               ),
+              // Entitlement must come from a verified Google Play purchase. Until
+              // that integration ships there is deliberately no control here that
+              // can grant (or revoke) Ad-Free status.
               trailing: monetization.isAdFreePurchased
                   ? const Chip(
                       label: Text('ACTIVE'),
                       backgroundColor: Color(0x2210B981),
                       side: BorderSide.none,
                     )
-                  : FilledButton.tonal(
-                      onPressed: () async {
-                        await ref.read(monetizationStateProvider.notifier).setAdFreePurchased(true);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Ad-Free Pro activated! Ads are now suppressed.'),
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('Remove'),
+                  : const FilledButton.tonal(
+                      onPressed: null,
+                      child: Text('Coming soon'),
                     ),
-              onTap: () async {
-                final newState = !monetization.isAdFreePurchased;
-                await ref.read(monetizationStateProvider.notifier).setAdFreePurchased(newState);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        newState
-                            ? 'Ad-Free Pro activated! Ads are suppressed.'
-                            : 'Ad-Free revoked. Ad-supported mode active.',
-                      ),
-                    ),
-                  );
-                }
-              },
             ),
           ),
           const SizedBox(height: AppSpacing.lg),

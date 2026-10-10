@@ -37,7 +37,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
   void initState() {
     super.initState();
     final existing = widget.existingServer;
-    _protocol = existing?.protocol ?? NetworkProtocol.smb;
+    _protocol = existing?.protocol ?? NetworkProtocol.webdav;
     _nameController = TextEditingController(text: existing?.name ?? '');
     _hostController = TextEditingController(text: existing?.host ?? '');
     _portController = TextEditingController(
@@ -181,9 +181,10 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
                   children: NetworkProtocol.values.map((p) {
                     final isSelected = _protocol == p;
                     return ChoiceChip(
-                      label: Text(p.shortName),
+                      label: Text(p.isSupported ? p.shortName : '${p.shortName} (coming soon)'),
                       selected: isSelected,
-                      onSelected: (_) => _onProtocolChanged(p),
+                      // Unsupported protocols cannot be added: they would only fail.
+                      onSelected: p.isSupported ? (_) => _onProtocolChanged(p) : null,
                     );
                   }).toList(),
                 ),

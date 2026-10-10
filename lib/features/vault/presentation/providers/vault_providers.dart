@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/result/result.dart';
 import '../../../../data/vault/vault_auth_service.dart';
 import '../../../../data/vault/vault_cipher.dart';
+import '../../../../data/vault/vault_share_service.dart';
 import '../../../../data/vault/vault_storage_service.dart';
 import '../../../../domain/models/file_entity.dart';
 import '../../../../domain/models/vault_models.dart';
 import '../../../../domain/repositories/i_vault_storage_service.dart';
+import '../../../files/presentation/providers/category_files_providers.dart';
 import '../../../files/presentation/providers/storage_providers.dart';
+import '../../../search/presentation/providers/search_providers.dart';
 
 /// Provider for VaultCipher.
 final vaultCipherProvider = Provider<VaultCipher>((ref) => VaultCipher());
@@ -30,6 +33,14 @@ final vaultStorageServiceProvider = Provider<IVaultStorageService>((ref) {
   );
 });
 
+/// Provider for the "share securely" hand-off (short-lived decrypted copy).
+final vaultShareServiceProvider = Provider<VaultShareService>((ref) {
+  final service = VaultShareService(storage: ref.watch(vaultStorageServiceProvider));
+  // Remove any plaintext left by a previous run that was killed mid-share.
+  service.sweepStale();
+  return service;
+});
+
 /// Provider loading current Vault security configuration.
 final vaultSecurityConfigProvider =
     FutureProvider<VaultSecurityConfig>((ref) async {
@@ -38,6 +49,10 @@ final vaultSecurityConfigProvider =
 });
 
 /// Notifier tracking vault unlock state and active session.
+///
+/// [vaultItemsProvider] watches this provider, so it rebuilds on every
+/// lock/unlock; invalidating it from here is redundant and trips Riverpod's
+/// circular-dependency assertion in debug builds.
 class VaultSessionNotifier extends StateNotifier<bool> {
   final VaultAuthService authService;
   final Ref ref;
@@ -49,7 +64,6 @@ class VaultSessionNotifier extends StateNotifier<bool> {
     final result = await authService.verifyPin(pin);
     if (result.success) {
       state = true;
-      ref.invalidate(vaultItemsProvider);
     }
     return result;
   }
@@ -59,7 +73,6 @@ class VaultSessionNotifier extends StateNotifier<bool> {
     if (success) {
       state = true;
       ref.invalidate(vaultSecurityConfigProvider);
-      ref.invalidate(vaultItemsProvider);
     }
     return success;
   }
@@ -68,7 +81,6 @@ class VaultSessionNotifier extends StateNotifier<bool> {
     final result = await authService.authenticateWithBiometrics();
     if (result.success) {
       state = true;
-      ref.invalidate(vaultItemsProvider);
     }
     return result;
   }
@@ -76,7 +88,6 @@ class VaultSessionNotifier extends StateNotifier<bool> {
   void lock() {
     authService.lock();
     state = false;
-    ref.invalidate(vaultItemsProvider);
   }
 }
 
@@ -107,6 +118,13 @@ class VaultItemsNotifier extends AsyncNotifier<List<VaultItem>> {
     final storage = ref.read(vaultStorageServiceProvider);
     final result = await storage.importFileToVault(sourcePath, deleteSource: deleteSource);
     if (result.isSuccess) {
+      final item = result.dataOrNull;
+      if (deleteSource && item != null) {
+        // The original is gone: drop its name, path and extracted/OCR text from the
+        // public search index so a vaulted file can never surface in normal Search.
+        await ref.read(indexingServiceProvider).removeFileByPath(item.originalPath);
+        ref.invalidate(categoryFileCountsProvider);
+      }
       await refresh();
     }
     return result;

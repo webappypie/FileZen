@@ -88,6 +88,7 @@ class NetworkTransferController extends StateNotifier<AsyncValue<void>> {
     required String sourcePath,
     required String destinationPath,
     NetworkProtocol? protocol,
+    String? serverId,
     String? cloudProvider,
     int totalBytes = 0,
   }) async {
@@ -97,6 +98,7 @@ class NetworkTransferController extends StateNotifier<AsyncValue<void>> {
       sourcePath: sourcePath,
       destinationPath: destinationPath,
       protocol: protocol,
+      serverId: serverId,
       cloudProvider: cloudProvider,
       totalBytes: totalBytes,
     );

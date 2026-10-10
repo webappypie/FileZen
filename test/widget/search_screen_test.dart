@@ -1,4 +1,7 @@
+import 'package:drift/native.dart';
 import 'package:filezen/core/result/result.dart';
+import 'package:filezen/data/database/app_database.dart';
+import 'package:filezen/data/database/database_provider.dart';
 import 'package:filezen/domain/models/file_category.dart';
 import 'package:filezen/domain/models/file_entity.dart';
 import 'package:filezen/domain/models/search_query.dart';
@@ -50,6 +53,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          // Isolated in-memory database: never open the on-disk app database from tests.
+          appDatabaseProvider.overrideWith((ref) {
+            final db = AppDatabase(NativeDatabase.memory());
+            ref.onDispose(db.close);
+            return db;
+          }),
           searchRepositoryProvider.overrideWithValue(_FakeSearchRepository([mockItem])),
           indexedCountProvider.overrideWith((ref) => Future.value(42)),
         ],
@@ -82,6 +91,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          // Isolated in-memory database: never open the on-disk app database from tests.
+          appDatabaseProvider.overrideWith((ref) {
+            final db = AppDatabase(NativeDatabase.memory());
+            ref.onDispose(db.close);
+            return db;
+          }),
           searchRepositoryProvider.overrideWithValue(_FakeSearchRepository([mockItem])),
           indexedCountProvider.overrideWith((ref) => Future.value(1)),
         ],
@@ -107,6 +122,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          // Isolated in-memory database: never open the on-disk app database from tests.
+          appDatabaseProvider.overrideWith((ref) {
+            final db = AppDatabase(NativeDatabase.memory());
+            ref.onDispose(db.close);
+            return db;
+          }),
           searchRepositoryProvider.overrideWithValue(_FakeSearchRepository([])),
           indexedCountProvider.overrideWith((ref) => Future.value(0)),
         ],
